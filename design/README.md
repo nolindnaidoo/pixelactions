@@ -12,6 +12,8 @@ Local design work for the executor half of the pixelcoords loop.
 | [04-SPEC-DRAFT.md](04-SPEC-DRAFT.md) | Flow file format, CLI surface, exit-code contract, the MCP question |
 | [05-NON-GOALS.md](05-NON-GOALS.md) | What it refuses to become |
 | [06-RISKS-AND-VERDICT.md](06-RISKS-AND-VERDICT.md) | Is it legitimate, the four risks, and what would make us abandon it |
+| [07-MILESTONES.md](07-MILESTONES.md) | What ships in what order, and what "valuable" means concretely |
+| [08-PIXELCOORDS-CONTRACT.md](08-PIXELCOORDS-CONTRACT.md) | Who owns what across the two tools; overlaps with pixelcoords' roadmap |
 
 ## The one-paragraph version
 
@@ -32,3 +34,8 @@ Spike #1 in [03-ARCHITECTURE.md](03-ARCHITECTURE.md): the
 moved between capture and run. That's the differentiator; the platform
 matrix is engineering we know how to do, and Wayland is upside earned
 after the tool is real.
+
+Then 0.1.0 per [07-MILESTONES.md](07-MILESTONES.md) — macOS only,
+deliberately — and its definition of done is not a release: it's the
+author replacing a real manual routine with a flow file and not
+reaching for anything else for a week.

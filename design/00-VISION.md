@@ -54,12 +54,29 @@ reports exactly which step lied. Actions stop being fire-and-forget.
 - The session.json contract is the seam: pixelactions consumes it,
   never redefines it.
 
-## Open questions (to be answered by market + tech research)
+## Questions the research answered
 
-- Is the sanctioned Wayland input path (portal/libei) mature enough in
-  2026 to promise Wayland support honestly?
-- Do computer-use agent stacks want a CLI, an MCP server, or both?
-- Declarative format: standalone actions file referencing session
-  labels, or inline in an extended session?
-- Where is the line between pixelactions and an RPA suite — what do we
-  refuse to become? (Draft non-goals early.)
+- **Is the Wayland input path mature enough to promise?** Partially:
+  portal RemoteDesktop + libei works on GNOME and KDE (absolute motion
+  requires a linked screencast grant), wlroots needs its own protocol,
+  uinput can't do absolute at all. Verdict: a laddered, honestly-labeled
+  implementation — and **not a gate on the project**, since every
+  current demand signal runs on macOS/Windows/X11 today. See
+  `06-RISKS-AND-VERDICT.md`.
+- **CLI or MCP for agents?** Both, in that order. Agent stacks today
+  wrap pyautogui/robotjs with no verification; an MCP surface is
+  plausibly the commercially relevant one, but it's worthless over an
+  unproven executor. CLI first (`07-MILESTONES.md`).
+- **Format?** Standalone flow file referencing session *labels*, never
+  raw coordinates — that indirection is what survives UI drift and stays
+  reviewable in git (`04-SPEC-DRAFT.md`).
+- **Where's the RPA line?** No loops, no conditionals, no recorder —
+  written down in `05-NON-GOALS.md` before any code exists.
+
+## The finding that changed the design
+
+**"Physical pixels" is not portable.** Windows and X11 take physical
+pixels; macOS CGEvent takes *logical points*; Wayland absolute motion
+lives in a screencast stream's space. The coordinate-conversion layer is
+therefore the actual product — clicking is the easy part — and
+pixelcoords' per-monitor `scale` recording is what makes it tractable.
