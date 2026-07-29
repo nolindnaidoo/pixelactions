@@ -11,13 +11,16 @@
 //! - A watchdog bounds the whole run, so a flow can never sit there
 //!   holding your mouse forever.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
+use pixelactions_core::convert::{ResolvedPoint, Space, to_space};
 use pixelactions_core::flow::{Flow, Step, Verify};
 use pixelactions_core::plan::Plan;
 use pixelactions_core::report::{RunReport, StepOutcome, StepReport};
+use pixelcoords_core::session::MonitorRecord;
 
 use crate::inject::{Button, Injector};
 use crate::verify;
@@ -26,23 +29,31 @@ use crate::verify;
 /// human flow, short enough that a wedged run does not own the machine.
 pub const WATCHDOG: Duration = Duration::from_secs(120);
 
-/// Before acting: confirm every region the flow will touch is still on
-/// screen, unambiguously.
+/// What relocation learned: where each region is *now*.
+pub type Corrections = HashMap<String, ResolvedPoint>;
+
+/// Before acting: re-locate every region the flow will touch, and hand
+/// back their current points.
 ///
-/// This is the difference between automation and vandalism. A flow whose
-/// targets have moved would otherwise click whatever now occupies those
-/// coordinates.
+/// Two properties, in order of importance. A region that cannot be found
+/// unambiguously **stops the run** — clicking coordinates whose regions
+/// have moved is vandalism, not automation. A region that moved but is
+/// still identifiable yields a corrected point, so the flow heals
+/// instead of failing. That second half is the reason a session written
+/// last month still works today.
 pub fn preflight(
     flow: &Flow,
     session: &Path,
+    monitors: &[MonitorRecord],
+    space: Space,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
-) -> Result<()> {
+) -> Result<Corrections> {
     if !flow.settings.relocate {
-        return Ok(());
+        return Ok(Corrections::new());
     }
     let targets = flow.targets();
     if targets.is_empty() {
-        return Ok(());
+        return Ok(Corrections::new());
     }
 
     let report = verifier(session, None)?;
@@ -58,13 +69,42 @@ pub fn preflight(
         .collect();
 
     if unconfirmed.is_empty() {
-        return Ok(());
+        return Ok(corrections(&report, &targets, monitors, space));
     }
     bail!(
         "the screen no longer matches the session: {}. Re-mark with pixelcoords, or set \
          relocate = false in the flow to act on the saved coordinates anyway",
         unconfirmed.join("; ")
     )
+}
+
+/// Translate each found region's current position into an actable point.
+///
+/// A region whose new geometry is missing, or whose corrected point falls
+/// outside every described monitor, simply gets no correction — the flow
+/// then acts on the saved coordinate, which preflight already confirmed
+/// still matches.
+fn corrections(
+    report: &verify::FindReport,
+    targets: &[&str],
+    monitors: &[MonitorRecord],
+    space: Space,
+) -> Corrections {
+    let mut corrections = Corrections::new();
+    for label in targets {
+        let Some((monitor_index, local)) = report.corrected_point(label) else {
+            continue;
+        };
+        let Some(monitor) = monitors.iter().find(|m| m.index == monitor_index) else {
+            continue;
+        };
+        let global_x = monitor.origin_px.x + local.x;
+        let global_y = monitor.origin_px.y + local.y;
+        if let Some(point) = to_space(monitors, global_x, global_y, space) {
+            corrections.insert((*label).to_string(), point);
+        }
+    }
+    corrections
 }
 
 /// A human sentence for one region's state, using the score and drift
@@ -97,6 +137,7 @@ pub fn execute(
     flow: &Flow,
     plan: &Plan,
     session: &Path,
+    corrections: &Corrections,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> RunReport {
     let started = Instant::now();
@@ -121,18 +162,22 @@ pub fn execute(
         }
 
         let step_started = Instant::now();
-        let outcome = perform(injector, &planned.step, planned, settle)
+        // Act on where the regions are now, not where they were when the
+        // session was captured.
+        let points = corrected_points(planned, corrections);
+        let outcome = perform(injector, &planned.step, planned, &points, settle)
             .and_then(|()| confirm(flow, &planned.step, session, verifier));
         let elapsed = step_started.elapsed().as_millis() as u64;
 
         match outcome {
-            Ok(outcome) => steps.push(record(planned, outcome, None, elapsed)),
+            Ok(outcome) => steps.push(record_with(planned, outcome, None, elapsed, points)),
             Err(error) => {
-                steps.push(record(
+                steps.push(record_with(
                     planned,
                     StepOutcome::Failed,
                     Some(format!("{error:#}")),
                     elapsed,
+                    points,
                 ));
                 failed = true;
             }
@@ -153,14 +198,43 @@ fn record(
     detail: Option<String>,
     elapsed_ms: u64,
 ) -> StepReport {
+    let points = planned.points.clone();
+    record_with(planned, outcome, detail, elapsed_ms, points)
+}
+
+/// The report records the points that were **actually used**, corrections
+/// included — so a reader can see where the click went, not where the
+/// session said it would.
+fn record_with(
+    planned: &pixelactions_core::plan::PlannedStep,
+    outcome: StepOutcome,
+    detail: Option<String>,
+    elapsed_ms: u64,
+    points: Vec<ResolvedPoint>,
+) -> StepReport {
     StepReport {
         index: planned.index,
         summary: planned.summary.clone(),
         outcome,
-        points: planned.points.clone(),
+        points,
         detail,
         elapsed_ms,
     }
+}
+
+/// A step's points, with any relocation applied. Targets and points are
+/// positionally paired by the planner, so the same index selects both.
+fn corrected_points(
+    planned: &pixelactions_core::plan::PlannedStep,
+    corrections: &Corrections,
+) -> Vec<ResolvedPoint> {
+    planned
+        .step
+        .targets()
+        .iter()
+        .zip(planned.points.iter())
+        .map(|(label, planned_point)| corrections.get(*label).copied().unwrap_or(*planned_point))
+        .collect()
 }
 
 /// Perform one step's input.
@@ -168,23 +242,25 @@ fn perform(
     injector: &mut dyn Injector,
     step: &Step,
     planned: &pixelactions_core::plan::PlannedStep,
+    points: &[ResolvedPoint],
     settle: Duration,
 ) -> Result<()> {
+    let points_for_step = points.to_vec();
     match step {
         Step::Click { .. } => {
-            let point = first_point(planned)?;
+            let point = first_point(planned, &points_for_step)?;
             injector.move_to(point.0, point.1)?;
             std::thread::sleep(settle);
             injector.click(Button::Left)?;
         }
         Step::DoubleClick { .. } => {
-            let point = first_point(planned)?;
+            let point = first_point(planned, &points_for_step)?;
             injector.move_to(point.0, point.1)?;
             std::thread::sleep(settle);
             injector.double_click(Button::Left)?;
         }
         Step::Drag { .. } => {
-            let [from, to] = two_points(planned)?;
+            let [from, to] = two_points(&points_for_step)?;
             injector.move_to(from.0, from.1)?;
             std::thread::sleep(settle);
             injector.press(Button::Left)?;
@@ -245,19 +321,19 @@ fn confirm(
     bail!(detail)
 }
 
-fn first_point(planned: &pixelactions_core::plan::PlannedStep) -> Result<(f64, f64)> {
-    let Some(point) = planned.points.first() else {
+fn first_point(
+    planned: &pixelactions_core::plan::PlannedStep,
+    points: &[ResolvedPoint],
+) -> Result<(f64, f64)> {
+    let Some(point) = points.first() else {
         bail!("step {} resolved to no point", planned.index + 1);
     };
     Ok((point.x, point.y))
 }
 
-fn two_points(planned: &pixelactions_core::plan::PlannedStep) -> Result<[(f64, f64); 2]> {
-    let [from, to] = planned.points.as_slice() else {
-        bail!(
-            "drag needs two resolved points, got {}",
-            planned.points.len()
-        );
+fn two_points(points: &[ResolvedPoint]) -> Result<[(f64, f64); 2]> {
+    let [from, to] = points else {
+        bail!("drag needs two resolved points, got {}", points.len());
     };
     Ok([(from.x, from.y), (to.x, to.y)])
 }
@@ -337,6 +413,7 @@ mod tests {
             &flow_with(Verify::None),
             &plan,
             Path::new("/tmp/session"),
+            &Corrections::new(),
             &mut always_found(),
         );
         assert_eq!(injector.events, vec!["move 100,200", "click"]);
@@ -361,6 +438,7 @@ mod tests {
             &flow_with(Verify::None),
             &plan,
             Path::new("/tmp/session"),
+            &Corrections::new(),
             &mut always_found(),
         );
         assert_eq!(injector.events.first().expect("moved"), "move 0,0");
@@ -401,6 +479,7 @@ mod tests {
             &flow_with(Verify::Each),
             &plan,
             Path::new("/tmp/session"),
+            &Corrections::new(),
             &mut never_found(),
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
@@ -427,6 +506,7 @@ mod tests {
             &flow_with(Verify::None),
             &plan,
             Path::new("/tmp/session"),
+            &Corrections::new(),
             &mut always_found(),
         );
         assert_eq!(unverified.steps[0].outcome, StepOutcome::Executed);
@@ -436,6 +516,7 @@ mod tests {
             &flow_with(Verify::Each),
             &plan,
             Path::new("/tmp/session"),
+            &Corrections::new(),
             &mut always_found(),
         );
         assert_eq!(verified.steps[0].outcome, StepOutcome::Verified);
@@ -457,9 +538,118 @@ mod tests {
             &flow_with(Verify::None),
             &plan,
             Path::new("/tmp/session"),
+            &Corrections::new(),
             &mut never_found(),
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+    }
+
+    fn monitors() -> Vec<MonitorRecord> {
+        vec![MonitorRecord {
+            index: 0,
+            name: "retina".into(),
+            primary: true,
+            origin_px: pixelcoords_core::geometry::Point::new(0, 0),
+            size_px: pixelcoords_core::geometry::Size::new(3024, 1964),
+            scale: 2.0,
+        }]
+    }
+
+    /// A verifier reporting that `submit` moved up 120 physical pixels.
+    fn moved_up() -> impl FnMut(&Path, Option<&str>) -> Result<verify::FindReport> {
+        |_, _| {
+            Ok(serde_json::from_str(
+                r#"{"all_relocated":true,"results":[
+                    {"label":"submit","found":true,"ambiguous":false,"score":0.99,
+                     "monitor":0,"new_px":{"x":812,"y":320,"w":96,"h":40},
+                     "delta":{"dx":0,"dy":-120}}]}"#,
+            )
+            .expect("fixture"))
+        }
+    }
+
+    #[test]
+    fn a_moved_region_is_clicked_where_it_is_now_not_where_it_was() {
+        // The whole differentiator in one test. The session says the
+        // region is at one place; the screen says another; the click must
+        // follow the screen.
+        let flow =
+            Flow::parse("session = \"s\"\n\n[[step]]\naction = \"click\"\ntarget = \"submit\"\n")
+                .expect("valid");
+        let corrections = preflight(
+            &flow,
+            Path::new("/tmp/session"),
+            &monitors(),
+            Space::Logical,
+            &mut moved_up(),
+        )
+        .expect("regions found");
+
+        // New bbox 812,320 96x40 → click point 860,340 physical → /2 on a
+        // Retina display → 430,170 logical.
+        let corrected = corrections.get("submit").expect("corrected");
+        assert!((corrected.x - 430.0).abs() < f64::EPSILON);
+        assert!((corrected.y - 170.0).abs() < f64::EPSILON);
+
+        let mut injector = Recording::default();
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Click {
+                    target: "submit".into(),
+                },
+                // What the session recorded — deliberately stale.
+                vec![point(406.0, 230.0)],
+            )],
+        };
+        let report = execute(
+            &mut injector,
+            &flow_with(Verify::None),
+            &plan,
+            Path::new("/tmp/session"),
+            &corrections,
+            &mut moved_up(),
+        );
+        assert_eq!(injector.events, vec!["move 430,170", "click"]);
+        // And the report records where it actually clicked, not the plan.
+        assert!((report.steps[0].points[0].x - 430.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn preflight_refuses_when_a_target_cannot_be_found() {
+        let flow =
+            Flow::parse("session = \"s\"\n\n[[step]]\naction = \"click\"\ntarget = \"submit\"\n")
+                .expect("valid");
+        let error = preflight(
+            &flow,
+            Path::new("/tmp/session"),
+            &monitors(),
+            Space::Logical,
+            &mut never_found(),
+        )
+        .expect_err("must refuse");
+        let message = format!("{error:#}");
+        assert!(message.contains("no longer matches"), "message: {message}");
+        assert!(message.contains("submit"), "names the region: {message}");
+    }
+
+    #[test]
+    fn preflight_is_skipped_entirely_when_relocation_is_off() {
+        let mut flow =
+            Flow::parse("session = \"s\"\n\n[[step]]\naction = \"click\"\ntarget = \"submit\"\n")
+                .expect("valid");
+        flow.settings.relocate = false;
+        // never_found() would refuse — but relocation is off, so the
+        // verifier is never consulted.
+        let corrections = preflight(
+            &flow,
+            Path::new("/tmp/session"),
+            &monitors(),
+            Space::Logical,
+            &mut never_found(),
+        )
+        .expect("no preflight");
+        assert!(corrections.is_empty());
     }
 
     #[test]
@@ -478,6 +668,7 @@ mod tests {
             &flow_with(Verify::Each),
             &plan,
             Path::new("/tmp/session"),
+            &Corrections::new(),
             &mut always_found(),
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Executed);

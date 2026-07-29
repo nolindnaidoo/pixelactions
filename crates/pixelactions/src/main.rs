@@ -70,9 +70,24 @@ fn run_flow(flow_path: &std::path::Path, json: bool, yes: bool) -> Result<i32> {
     // Refuse before acting when the screen has drifted from the capture:
     // clicking coordinates whose regions have moved is vandalism, not
     // automation.
-    if let Err(refusal) = run::preflight(&flow, &session_path, &mut verifier) {
-        eprintln!("pixelactions: {refusal:#}");
-        return Ok(EXIT_REFUSED);
+    let corrections = match run::preflight(
+        &flow,
+        &session_path,
+        &session.monitors,
+        space,
+        &mut verifier,
+    ) {
+        Ok(corrections) => corrections,
+        Err(refusal) => {
+            eprintln!("pixelactions: {refusal:#}");
+            return Ok(EXIT_REFUSED);
+        }
+    };
+    if !corrections.is_empty() {
+        eprintln!(
+            "relocated {} region(s) since capture — acting on their current positions",
+            corrections.len()
+        );
     }
 
     let mut injector = make_injector()?;
@@ -81,6 +96,7 @@ fn run_flow(flow_path: &std::path::Path, json: bool, yes: bool) -> Result<i32> {
         &flow,
         &resolved,
         &session_path,
+        &corrections,
         &mut verifier,
     );
 

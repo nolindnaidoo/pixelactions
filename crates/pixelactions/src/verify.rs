@@ -13,6 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use pixelcoords_core::geometry::Shape;
 use serde::Deserialize;
 
 /// The subset of `pixelcoords find --json` this tool reads. Deliberately
@@ -36,6 +37,14 @@ pub struct FindResult {
     pub delta: Option<Delta>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// Which monitor the region was re-found on.
+    #[serde(default)]
+    pub monitor: usize,
+    /// Where the region is **now**, in that monitor's local pixels —
+    /// parsed as the sister crate's own `Shape` so the corrected click
+    /// point comes from its geometry, not a reimplementation here.
+    #[serde(default)]
+    pub new_px: Option<Shape>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -57,6 +66,23 @@ impl FindReport {
     pub fn is_confirmed(&self, label: &str) -> bool {
         self.result_for(label)
             .is_some_and(|r| r.found && !r.ambiguous)
+    }
+
+    /// The region's current monitor-local click point, when it was found
+    /// unambiguously and reported with geometry.
+    ///
+    /// `None` means "act on the saved coordinates" — either nothing
+    /// moved, or the report carried no new shape.
+    pub fn corrected_point(
+        &self,
+        label: &str,
+    ) -> Option<(usize, pixelcoords_core::geometry::Point)> {
+        let result = self.result_for(label)?;
+        if !result.found || result.ambiguous {
+            return None;
+        }
+        let shape = result.new_px.as_ref()?;
+        Some((result.monitor, shape.click_point()))
     }
 }
 
@@ -158,6 +184,24 @@ mod tests {
         );
         let parsed: FindReport = serde_json::from_str(&future).expect("still parses");
         assert!(parsed.is_confirmed("submit"));
+    }
+
+    #[test]
+    fn a_moved_region_yields_a_corrected_click_point() {
+        // submit moved up 120px; its new bbox is 812,320 96x40, whose
+        // click point is its center — computed by pixelcoords-core, not
+        // by arithmetic written here.
+        let (monitor, point) = report()
+            .corrected_point("submit")
+            .expect("has new geometry");
+        assert_eq!(monitor, 0);
+        assert_eq!((point.x, point.y), (860, 340));
+    }
+
+    #[test]
+    fn an_ambiguous_or_missing_region_yields_no_correction() {
+        assert!(report().corrected_point("twins").is_none());
+        assert!(report().corrected_point("gone").is_none());
     }
 
     #[test]

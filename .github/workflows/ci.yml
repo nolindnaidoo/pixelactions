@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS is the supported platform; the other two build the
+        # platform-free core and prove nothing macOS-specific leaked into
+        # it. Injection is not exercised anywhere — it cannot be verified
+        # headless, and the tool says so rather than pretending.
+        os: [macos-15, ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Install Linux input dependencies
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 libxdo-dev libxkbcommon-dev pkg-config
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --workspace --locked
+
+  msrv:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.88"
+      - name: Verify the declared rust-version actually builds
+        run: cargo check --workspace --locked
+
+  policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Forbid inline lint suppressions
+        run: |
+          if grep -rn '#\[allow(' crates --include='*.rs'; then
+            echo 'Inline #[allow] found — fix the lint or relax it in [workspace.lints].'
+            exit 1
+          fi
+
+  # AGENTS.md sets a 90% line coverage floor per module for the core crate.
+  coverage:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: cargo-llvm-cov
+      - name: Measure core coverage
+        run: |
+          cargo llvm-cov -p pixelactions-core --no-report
+          cargo llvm-cov report -p pixelactions-core --json --output-path coverage.json
+      - name: Enforce the per-module floor
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          FLOOR = 90.0
+          files = json.load(open("coverage.json"))["data"][0]["files"]
+          under = []
+          for f in files:
+              name = f["filename"].split("/")[-1]
+              pct = f["summary"]["lines"]["percent"]
+              print(f"{name:16} {pct:6.2f}%")
+              if pct < FLOOR:
+                  under.append((name, pct))
+          if under:
+              print(f"\nAGENTS.md sets a {FLOOR}% line coverage floor per module:")
+              for name, pct in under:
+                  print(f"  {name}: {pct:.2f}%")
+              sys.exit(1)
+          PY
+
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: cargo-audit
+      - run: cargo audit
