@@ -117,7 +117,7 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
     };
     if !corrections.is_empty() {
         eprintln!(
-            "relocated {} region(s) since capture — acting on their current positions",
+            "{} region(s) moved since capture — acting on where they are now",
             corrections.len()
         );
     }

@@ -59,7 +59,13 @@ pub fn preflight(
     }
 
     let report = verifier(session, None)?;
-    let unconfirmed: Vec<String> = targets
+    // Only the regions this run will *act on* have to be present. A
+    // `wait_for` is waiting for something that is not there yet, and a
+    // `wait_gone` succeeds precisely when its region is absent —
+    // demanding either up front made both verbs impossible to use from
+    // the command line.
+    let unconfirmed: Vec<String> = flow
+        .acting_targets()
         .iter()
         .filter(|label| !report.is_confirmed(label))
         .map(|label| {
@@ -189,6 +195,17 @@ pub fn corrections(
 ) -> Corrections {
     let mut corrections = Corrections::new();
     for label in targets {
+        // A region that did not move needs no correction. Recording one
+        // anyway is harmless arithmetic but makes the run *report* that
+        // it relocated things when nothing changed, which is exactly the
+        // kind of small dishonesty this tool exists to avoid.
+        let moved = report
+            .result_for(label)
+            .and_then(|result| result.delta)
+            .is_some_and(|delta| delta.dx != 0 || delta.dy != 0);
+        if !moved {
+            continue;
+        }
         let Some((monitor_index, local)) = report.corrected_point(label) else {
             continue;
         };

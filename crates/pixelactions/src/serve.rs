@@ -173,7 +173,7 @@ impl Server<'_> {
     /// Perform one step, through the same path a flow file takes.
     fn step(&mut self, step: Step) -> ResponseBody {
         let targets: Vec<String> = step.targets().iter().map(|t| (*t).to_string()).collect();
-        if acts_on_screen(&step)
+        if step.injects()
             && let Err(detail) = self.ensure_relocated(&targets)
         {
             return ResponseBody::Error { detail };
@@ -310,21 +310,6 @@ fn refuse_on_stdout(detail: &str) -> i32 {
     crate::EXIT_REFUSED
 }
 
-/// Whether a step moves the mouse or keyboard, as opposed to only
-/// looking. Only the acting half needs coordinates it can trust, so only
-/// the acting half pays for a relocation pass.
-fn acts_on_screen(step: &Step) -> bool {
-    matches!(
-        step,
-        Step::Click { .. }
-            | Step::DoubleClick { .. }
-            | Step::Drag { .. }
-            | Step::Scroll { .. }
-            | Step::Type { .. }
-            | Step::Key { .. }
-    )
-}
-
 /// A request's verb, for error messages.
 fn describe(body: &RequestBody) -> String {
     match body {
@@ -339,21 +324,6 @@ fn describe(body: &RequestBody) -> String {
 mod tests {
     use super::*;
     use pixelactions_core::flow::Verify;
-
-    #[test]
-    fn only_acting_steps_need_trustworthy_coordinates() {
-        assert!(acts_on_screen(&Step::Click { target: "a".into() }));
-        assert!(acts_on_screen(&Step::Type { text: "hi".into() }));
-        assert!(acts_on_screen(&Step::Drag {
-            from: "a".into(),
-            to: "b".into()
-        }));
-        // Observation only: these read the screen, they never move it.
-        assert!(!acts_on_screen(&Step::Verify { target: "a".into() }));
-        assert!(!acts_on_screen(&Step::WaitFor { target: "a".into() }));
-        assert!(!acts_on_screen(&Step::WaitGone { target: "a".into() }));
-        assert!(!acts_on_screen(&Step::Pause { ms: 10 }));
-    }
 
     #[test]
     fn a_verb_is_named_the_way_the_client_wrote_it() {
