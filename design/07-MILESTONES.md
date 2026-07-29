@@ -6,6 +6,15 @@ the differentiator on one platform, use it daily, then widen.**
 
 ## 0.1.0 — the loop, macOS only
 
+**Nothing in pixelcoords blocks this.** Shipped v0.1.1 already provides
+the schema (labels, physical px, per-monitor scale), `click_point` via
+`pixelcoords-core`, and `find` for capture-backed relocation and
+verification. The roadmap issues are enhancements for later milestones,
+not prerequisites — with one exception worth landing when convenient:
+[`resolve` (issue #21)](https://github.com/nolindnaidoo/pixelcoords/issues/21),
+which collapses find + click-point + space conversion into the single
+call an executor actually wants.
+
 **Scope:** `pixelactions run flow.toml` on macOS, against a pixelcoords
 session, with:
 
@@ -14,7 +23,8 @@ session, with:
 - actions: `click`, `type`, `key`, `drag`, `scroll`
 - `relocate = true` — call pixelcoords `find` first, act on corrected
   coordinates, refuse to act if a region is missing or ambiguous
-- `verify` — call pixelcoords `assert` after a step
+- `verify` — call pixelcoords `find --label X` after a step (it
+  captures; `assert` does not)
 - `--dry-run` printing every resolved coordinate and mechanism
 - `--json` run report; exit codes 0/1/2/3
 - `doctor` — Accessibility grant state, displays, scale factors

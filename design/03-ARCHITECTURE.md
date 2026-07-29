@@ -67,9 +67,15 @@ that an action landed.** Our loop:
 find (re-locate region, drift-corrected)  →  act  →  assert (state check)
 ```
 
-- `find` and `assert` already exist in pixelcoords. pixelactions calls
-  them rather than reimplementing — one geometry/matching
-  implementation, one source of truth.
+- **`find` is the verification primitive, not `assert`.** `assert` is
+  pure session math — it never captures the screen, so it answers "is
+  this coordinate inside a marked region," a question about the *file*.
+  `find --label X` captures fresh and reports whether the region still
+  matches its crop and where it is now. Post-action checks use `find`
+  (and later `diff`/`wait`); `assert` is for scoring points a caller
+  already has.
+- pixelactions calls these rather than reimplementing — one
+  geometry/matching implementation, one source of truth.
 - Waits are observable-based (poll a region until it matches, with a
   timeout), not sleep-based. Fixed inter-event delays remain only where
   the OS needs them (down→up spacing, drag interpolation).
