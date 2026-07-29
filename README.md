@@ -1,4 +1,22 @@
-# pixelactions
+<h1 align="center">pixelactions</h1>
+
+<p align="center">
+  <b>Consume human-verified coordinates, perform the interaction, confirm it landed</b><br/>
+  <i>Click, type, chord, drag, scroll — from a chained CLI, a flow file, or a line protocol any language can drive</i>
+</p>
+
+<p align="center">
+  <a href="https://github.com/nolindnaidoo/pixelactions/actions/workflows/ci.yml">
+    <img src="https://github.com/nolindnaidoo/pixelactions/actions/workflows/ci.yml/badge.svg" alt="Build Status" />
+  </a>
+  <img src="https://img.shields.io/badge/rustc-1.88+-93450a.svg" alt="MSRV: Rust 1.88+" />
+  <a href="https://github.com/nolindnaidoo/pixelactions/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" />
+  </a>
+  <a href="https://pixelactions.dev">
+    <img src="https://img.shields.io/badge/web-pixelactions.dev-00A0FF.svg" alt="pixelactions.dev" />
+  </a>
+</p>
 
 The executor half of the pixelcoords loop: **consume human-verified
 coordinates, perform the interaction, confirm it landed.**
