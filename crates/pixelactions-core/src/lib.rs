@@ -7,6 +7,11 @@
 //!
 //! The split exists for the same reason it does in pixelcoords: the part
 //! that decides *where to click* must be testable without a screen.
+//!
+//! The crate README is included below, which makes every example on the
+//! crates.io page a compiled doctest — documentation that cannot rot
+//! without failing CI.
+#![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
 pub mod chord;
