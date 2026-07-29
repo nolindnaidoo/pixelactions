@@ -96,6 +96,72 @@ fn resolve_space(space: Space) -> Space {
     }
 }
 
+/// Confirm, immediately before a step acts, that the regions it is about
+/// to touch are still there — and refresh their coordinates.
+///
+/// This is a **precondition**, and that is the point. "Is the thing I am
+/// about to click present and unambiguous?" has a stable answer. "Did the
+/// thing survive being clicked?" does not: focusing a field adds a caret
+/// and a border, so checking a region *after* acting on it reports failure
+/// precisely when the action worked. That check was never an outcome
+/// check, and pretending otherwise produced false failures on success —
+/// and, worse, false successes when a click was swallowed by window
+/// activation and the region sat untouched.
+///
+/// Checking here also keeps coordinates honest mid-run. Relocation used to
+/// happen once, before the first step, so any step that reflowed the page
+/// left every later step acting on stale positions.
+///
+/// To assert an *outcome*, name the thing that should have changed:
+/// `wait_for` what appears, `wait_gone` what disappears, `verify` another
+/// region.
+fn precheck(
+    flow: &Flow,
+    planned: &pixelactions_core::plan::PlannedStep,
+    session: &Path,
+    monitors: &[MonitorRecord],
+    known: &mut Corrections,
+    verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
+) -> Result<()> {
+    if flow.settings.verify != Verify::Each || !planned.step.injects() {
+        return Ok(());
+    }
+    let targets = planned.step.targets();
+    if targets.is_empty() {
+        return Ok(());
+    }
+
+    // One template at a time. Matching is the expensive half of a find —
+    // sweeping the whole session to check a single click costs seconds on a
+    // large display, and a step only needs the regions it is about to
+    // touch.
+    let mut unconfirmed = Vec::new();
+    for label in &targets {
+        let report = verifier(session, Some(label))?;
+        if !report.is_confirmed(label) {
+            let reason = report
+                .result_for(label)
+                .map_or_else(|| "not in the report".to_string(), describe);
+            unconfirmed.push(format!("{label} ({reason})"));
+            continue;
+        }
+        // Keep this label's coordinate current, and drop a correction that
+        // no longer applies — a region can move back to where it started.
+        let fresh = corrections(&report, &[label], monitors, flow.settings.space);
+        match fresh.get(*label) {
+            Some(point) => known.insert((*label).to_string(), *point),
+            None => known.remove(*label),
+        };
+    }
+    if !unconfirmed.is_empty() {
+        bail!(
+            "cannot act on {}. Nothing was injected for this step",
+            unconfirmed.join("; ")
+        );
+    }
+    Ok(())
+}
+
 /// The kill switch, checked before every step.
 ///
 /// A person who wants a run to stop grabs the mouse — that reflex is the
@@ -256,6 +322,14 @@ pub struct Context<'a> {
     pub session: &'a Path,
     pub monitors: &'a [MonitorRecord],
     pub corrections: &'a Corrections,
+    /// Whether a relocation pass has *just* confirmed these regions with
+    /// nothing injected since — i.e. whether the first step's own check
+    /// would be looking at the same screen for the second time.
+    ///
+    /// The caller knows this and the settings do not: a flow run preflights
+    /// once and then steps through, while the protocol server calls this
+    /// per request with no preflight at all.
+    pub checked: bool,
 }
 
 pub fn execute(
@@ -269,11 +343,18 @@ pub fn execute(
         session,
         monitors,
         corrections,
+        checked,
     } = *context;
     let started = Instant::now();
     let settle = Duration::from_millis(flow.settings.settle_ms);
     let mut steps: Vec<StepReport> = Vec::with_capacity(plan.steps.len());
     let mut failed = false;
+    // Owned, because the pre-step check refreshes it: a step that reflows
+    // the page moves every other region, and later steps must not act on
+    // coordinates measured before that happened.
+    let mut corrections = corrections.clone();
+    // Any step at all makes the picture stale again.
+    let mut fresh = checked;
 
     for planned in &plan.steps {
         if failed {
@@ -292,24 +373,31 @@ pub fn execute(
         }
 
         let step_started = Instant::now();
-        // Act on where the regions are now, not where they were when the
-        // session was captured.
-        let points = corrected_points(planned, corrections);
 
         // Guards run first and are reported apart from failures: nothing
         // was attempted, and the run earns exit 3 rather than 1.
-        if let Err(refusal) = failsafe_gate(flow, injector, monitors) {
+        let gate = failsafe_gate(flow, injector, monitors).and_then(|()| {
+            if fresh {
+                return Ok(());
+            }
+            precheck(flow, planned, session, monitors, &mut corrections, verifier)
+        });
+        if let Err(refusal) = gate {
             steps.push(record_with(
                 planned,
                 StepOutcome::Refused,
                 Some(format!("{refusal:#}")),
                 step_started.elapsed().as_millis() as u64,
-                points,
+                corrected_points(planned, &corrections),
             ));
             failed = true;
             continue;
         }
 
+        // Act on where the regions are *now* — the check above may have
+        // moved them.
+        fresh = false;
+        let points = corrected_points(planned, &corrections);
         let outcome = perform(injector, &planned.step, planned, &points, settle)
             .and_then(|()| confirm(flow, &planned.step, session, verifier));
         let elapsed = step_started.elapsed().as_millis() as u64;
@@ -443,52 +531,38 @@ fn perform(
 
 const DRAG_STEPS: u32 = 12;
 
-/// Ask pixelcoords whether the region a step touched is still there.
+/// What a step asserts once it has run.
+///
+/// Only observation steps assert anything. An acting step reports
+/// `executed` — the OS accepted the input — because the region it touched
+/// cannot confirm its own outcome; see [`precheck`]. Outcomes are asserted
+/// by naming what should have changed.
 fn confirm(
     flow: &Flow,
     step: &Step,
     session: &Path,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
-    // Waiting steps poll for a condition rather than checking once.
-    if let Step::WaitFor { target } = step {
-        return poll_until(flow, session, target, true, verifier);
+    match step {
+        Step::WaitFor { target } => poll_until(flow, session, target, true, verifier),
+        Step::WaitGone { target } => poll_until(flow, session, target, false, verifier),
+        Step::Verify { target } => check_once(session, target, verifier),
+        _ => Ok(StepOutcome::Executed),
     }
-    if let Step::WaitGone { target } = step {
-        return poll_until(flow, session, target, false, verifier);
-    }
+}
 
-    // Scrolling changes what is on screen on purpose, so checking that
-    // its own region still matches the crop asks the wrong question and
-    // would fail exactly when the step worked. It is the one targeted
-    // step that reports `executed` and stops there; confirm a scroll
-    // with a `wait_for` on whatever it was meant to bring into view.
-    if matches!(step, Step::Scroll { .. }) {
-        return Ok(StepOutcome::Executed);
-    }
-
-    // A `verify` step always checks, whatever the run-wide setting — it
-    // exists for no other reason.
-    let explicit = matches!(step, Step::Verify { .. });
-    if !explicit && flow.settings.verify != Verify::Each {
-        return Ok(StepOutcome::Executed);
-    }
-    let Some(target) = step.targets().first().copied() else {
-        // Keyboard steps have no region to check. Say "executed", never
-        // "verified" — the distinction is the point.
-        return Ok(StepOutcome::Executed);
-    };
-
+/// A `verify` step: look once, and say what was seen when it is not there.
+fn check_once(
+    session: &Path,
+    target: &str,
+    verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
+) -> Result<StepOutcome> {
     let report = verifier(session, Some(target))?;
     if report.is_confirmed(target) {
         return Ok(StepOutcome::Verified);
     }
-    let _ = report.all_relocated;
-    // Through the same description preflight uses, so a region that
-    // matched in three places is never reported as "did not match" —
-    // which is both false and the opposite of the fix.
     let detail = report.result_for(target).map_or_else(
-        || format!("region {target:?} was not in the report after the step"),
+        || format!("region {target:?} was not in the report"),
         |result| format!("region {target:?}: {}", describe(result)),
     );
     bail!(detail)
@@ -547,26 +621,34 @@ mod tests {
         flow
     }
 
+    /// Every label a test might name. The pre-step check sweeps the whole
+    /// session (`label: None`), so a fake has to answer for all of them,
+    /// not just the one being asked about.
+    const TEST_LABELS: &[&str] = &[
+        "submit", "next", "email", "results", "a", "b", "x", "dialog",
+    ];
+
+    fn report_of(label: Option<&str>, found: bool) -> verify::FindReport {
+        let labels: Vec<&str> = label.map_or_else(|| TEST_LABELS.to_vec(), |one| vec![one]);
+        let results: Vec<String> = labels
+            .iter()
+            .map(|l| format!(r#"{{"label":"{l}","found":{found}}}"#))
+            .collect();
+        serde_json::from_str(&format!(
+            r#"{{"all_relocated":{found},"results":[{}]}}"#,
+            results.join(",")
+        ))
+        .expect("fixture")
+    }
+
     /// A verifier that confirms everything.
     fn always_found() -> impl FnMut(&Path, Option<&str>) -> Result<verify::FindReport> {
-        |_, label| {
-            Ok(serde_json::from_str(&format!(
-                r#"{{"all_relocated":true,"results":[{{"label":"{}","found":true}}]}}"#,
-                label.unwrap_or("x")
-            ))
-            .expect("fixture"))
-        }
+        |_, label| Ok(report_of(label, true))
     }
 
     /// A verifier that finds nothing.
     fn never_found() -> impl FnMut(&Path, Option<&str>) -> Result<verify::FindReport> {
-        |_, label| {
-            Ok(serde_json::from_str(&format!(
-                r#"{{"all_relocated":false,"results":[{{"label":"{}","found":false}}]}}"#,
-                label.unwrap_or("x")
-            ))
-            .expect("fixture"))
-        }
+        |_, label| Ok(report_of(label, false))
     }
 
     #[test]
@@ -589,6 +671,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );
@@ -624,6 +707,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );
@@ -668,6 +752,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );
@@ -730,6 +815,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );
@@ -763,6 +849,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &corrections,
+                checked: false,
             },
             &mut always_found(),
         );
@@ -791,6 +878,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );
@@ -800,11 +888,15 @@ mod tests {
     }
 
     #[test]
-    fn a_scroll_is_never_verified_against_its_own_region() {
-        // Scrolling changes that region on purpose. Checking it would
-        // fail precisely when the step worked, so the outcome is
-        // `executed` even under verify = "each".
-        let mut injector = Recording::default();
+    fn a_scroll_is_never_checked_against_its_own_region_afterwards() {
+        // Scrolling moves its own region on purpose. A verifier that
+        // answers only the pre-step check proves nothing looks again after
+        // the wheel turns.
+        let mut looks = 0;
+        let mut once = move |_: &Path, label: Option<&str>| {
+            looks += 1;
+            Ok(report_of(label, looks == 1))
+        };
         let plan = Plan {
             steps: vec![planned(
                 0,
@@ -817,16 +909,16 @@ mod tests {
             )],
         };
         let report = execute(
-            &mut injector,
+            &mut Recording::default(),
             &Context {
                 flow: &flow_with(Verify::Each),
                 plan: &plan,
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
-            // Would report the region missing — and must not be consulted.
-            &mut never_found(),
+            &mut once,
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Executed);
         assert_eq!(report.exit_code(), 0);
@@ -859,6 +951,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );
@@ -887,6 +980,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );
@@ -903,7 +997,12 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_verification_fails_the_step_and_skips_the_rest() {
+    fn a_region_that_cannot_be_found_refuses_before_injecting_anything() {
+        // Under the old model this clicked first and failed the check
+        // afterwards, so the input had already landed somewhere. The check
+        // is a precondition now: if the region cannot be confirmed, nothing
+        // is injected at all, and the run earns a refusal rather than a
+        // failure.
         let mut injector = Recording::default();
         let plan = Plan {
             steps: vec![
@@ -931,19 +1030,25 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut never_found(),
         );
-        assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+        assert_eq!(report.steps[0].outcome, StepOutcome::Refused);
         assert_eq!(report.steps[1].outcome, StepOutcome::Skipped);
-        assert_eq!(report.exit_code(), 1);
-        // The second step's input was never injected.
-        assert!(!injector.events.iter().any(|e| e == "move 20,20"));
+        assert_eq!(report.exit_code(), 3);
+        assert!(
+            injector.events.is_empty(),
+            "nothing may be injected when the region could not be confirmed"
+        );
     }
 
     #[test]
-    fn executed_and_verified_are_different_outcomes() {
-        let mut injector = Recording::default();
+    fn an_acting_step_reports_executed_never_verified() {
+        // A click cannot confirm its own outcome: acting on a region
+        // changes it, so "the region still matches" means the click did
+        // nothing. Acting steps report what is true — the input was posted
+        // — and outcomes are asserted by naming what should have changed.
         let plan = Plan {
             steps: vec![planned(
                 0,
@@ -953,31 +1058,119 @@ mod tests {
                 vec![point(1.0, 1.0)],
             )],
         };
-        let unverified = execute(
-            &mut injector,
-            &Context {
-                flow: &flow_with(Verify::None),
-                plan: &plan,
-                session: Path::new("/tmp/session"),
-                monitors: &monitors(),
-                corrections: &Corrections::new(),
-            },
-            &mut always_found(),
-        );
-        assert_eq!(unverified.steps[0].outcome, StepOutcome::Executed);
+        for verify in [Verify::None, Verify::Each] {
+            let report = execute(
+                &mut Recording::default(),
+                &Context {
+                    flow: &flow_with(verify),
+                    plan: &plan,
+                    session: Path::new("/tmp/session"),
+                    monitors: &monitors(),
+                    corrections: &Corrections::new(),
+                    checked: false,
+                },
+                &mut always_found(),
+            );
+            assert_eq!(
+                report.steps[0].outcome,
+                StepOutcome::Executed,
+                "verify = {verify:?}"
+            );
+        }
+    }
 
-        let verified = execute(
-            &mut Recording::default(),
+    #[test]
+    fn the_check_runs_before_the_step_not_after() {
+        // A verifier that answers once and then reports nothing. If the
+        // check happened after the input, the second call would fail the
+        // step; it succeeds, so the only look happened up front.
+        let mut looks = 0;
+        let mut once = move |_: &Path, label: Option<&str>| {
+            looks += 1;
+            Ok(report_of(label, looks == 1))
+        };
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Click {
+                    target: "submit".into(),
+                },
+                vec![point(5.0, 6.0)],
+            )],
+        };
+        let mut injector = Recording::default();
+        let report = execute(
+            &mut injector,
             &Context {
                 flow: &flow_with(Verify::Each),
                 plan: &plan,
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
-            &mut always_found(),
+            &mut once,
         );
-        assert_eq!(verified.steps[0].outcome, StepOutcome::Verified);
+        assert_eq!(report.steps[0].outcome, StepOutcome::Executed);
+        assert_eq!(injector.events, vec!["move 5,6", "click"]);
+    }
+
+    #[test]
+    fn a_step_acts_on_where_a_region_moved_mid_run() {
+        // The reflow bug: relocation used to happen once, before the first
+        // step, so a step that shifted the page left every later step
+        // clicking coordinates measured before the shift.
+        let mut looks = 0;
+        let mut drifting = move |_: &Path, _label: Option<&str>| {
+            looks += 1;
+            // Second look onward: "submit" has moved 120 physical pixels up.
+            let shift = if looks >= 2 {
+                r#","new_px":{"x":800,"y":280,"w":100,"h":80},"delta":{"dx":0,"dy":-120}"#
+            } else {
+                ""
+            };
+            Ok(serde_json::from_str(&format!(
+                r#"{{"all_relocated":true,"results":[{{"label":"submit","found":true,"monitor":0{shift}}}]}}"#
+            ))
+            .expect("fixture"))
+        };
+        let step = || {
+            planned(
+                0,
+                Step::Click {
+                    target: "submit".into(),
+                },
+                vec![point(425.0, 220.0)],
+            )
+        };
+        let plan = Plan {
+            steps: vec![step(), step()],
+        };
+        // Pinned, because `Auto` resolves to logical on macOS and physical
+        // everywhere else — an assertion on converted coordinates would
+        // pass on one platform and fail on the others.
+        let mut flow = flow_with(Verify::Each);
+        flow.settings.space = Space::Logical;
+        let mut injector = Recording::default();
+        execute(
+            &mut injector,
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: false,
+            },
+            &mut drifting,
+        );
+        // Rect 800,280 100x80 centers at 850,320 physical; /2 on this 2x
+        // monitor. The second click follows the region rather than
+        // repeating the first click's coordinates.
+        assert_eq!(
+            injector.events,
+            vec!["move 425,220", "click", "move 425,160", "click"]
+        );
     }
 
     #[test]
@@ -999,6 +1192,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut never_found(),
         );
@@ -1071,6 +1265,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &corrections,
+                checked: false,
             },
             &mut moved_up(),
         );
@@ -1163,6 +1358,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut appears_after(3),
         );
@@ -1193,6 +1389,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut never_found(),
         );
@@ -1234,6 +1431,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut ambiguous,
         );
@@ -1264,6 +1462,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut never_found(),
         );
@@ -1299,6 +1498,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut never_found(),
         );
@@ -1334,6 +1534,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &corrections,
+                checked: false,
             },
             &mut always_found(),
         );
@@ -1379,6 +1580,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut never_found(),
         );
@@ -1405,6 +1607,7 @@ mod tests {
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
+                checked: false,
             },
             &mut always_found(),
         );

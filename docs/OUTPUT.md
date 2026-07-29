@@ -27,10 +27,14 @@
   corrections included. A reader sees where the click went, not where
   the session said it would.
 - **`outcome`** distinguishes:
-  - `verified` — executed, and a fresh capture confirmed the region
-  - `executed` — executed; verification was not requested or not
-    applicable (keyboard steps have no region). **"Nothing errored" is
-    not "it worked"**, and this is where that distinction lives.
+  - `verified` — an observation step whose condition held: a `verify`,
+    `wait_for`, or `wait_gone`. These are the only steps that assert
+    anything about the screen.
+  - `executed` — the input was posted. **"Nothing errored" is not "it
+    worked"**, and this is where that distinction lives. Acting steps
+    always report this, never `verified`: a click cannot confirm its own
+    outcome, because acting on a region changes it. Assert the outcome by
+    naming what should have changed.
   - `skipped` — an earlier step failed
   - `failed` — the step or its verification failed; `detail` says why
   - `refused` — a guard declined *before* anything was attempted; today

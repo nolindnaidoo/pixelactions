@@ -93,11 +93,16 @@ done
 
 Clippy only checks, so no cross-linker or system libraries are needed.
 
-Tests are the other half, and they cannot be cross-run — a **path
-assertion written as a string literal** passes on Unix and fails on
-Windows, because `PathBuf::join` inserts the platform's own separator.
-Compare against a `PathBuf` built with `join`, not against a spelled-out
-path.
+Tests are the other half, and they cannot be cross-run. Two traps have
+already cost a red CI run each:
+
+- A **path assertion written as a string literal** passes on Unix and
+  fails on Windows, because `PathBuf::join` inserts the platform's own
+  separator. Compare against a `PathBuf` built with `join`.
+- A **coordinate assertion under `Space::Auto`** passes on macOS and fails
+  elsewhere, because `Auto` resolves to logical points on macOS and
+  physical pixels on Windows and X11. Pin `settings.space` in any test
+  that asserts a converted number.
 
 ## Testing
 

@@ -123,6 +123,13 @@ need:
   nothing.
 - **Reports distinguish "executed" from "verified".** "Nothing errored"
   is not "it worked", and the wire format says which.
+- **Region checks are preconditions, run before the step, never after.**
+  Acting on a region changes it — a focused field grows a caret — so a
+  post-action check reports failure when the action worked, and success
+  when a click was swallowed and nothing happened. Only observation steps
+  (`verify`, `wait_for`, `wait_gone`) assert anything about the screen;
+  acting steps report `executed`. Do not reintroduce a post-action check
+  of an acted-on region.
 - Injection got its watchdog and kill switch before it got convenience
   features. The kill switch is a corner check on the cursor before every
   step; it must stay on the path every surface takes, which is
