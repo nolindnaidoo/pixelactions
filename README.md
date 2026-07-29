@@ -16,15 +16,14 @@ find  →  act  →  assert
 
 ## Status
 
-**Early. macOS. Resolution only — it does not yet inject input.**
-
-That order is deliberate: a wrong coordinate is a click in the wrong
-place, so the resolution is proven before anything moves. `plan` is
-real today and will remain the permanent dry-run surface.
+**Early, and macOS only.** The loop works end to end: resolve a label to
+its click point, re-locate it against a fresh capture, act, and confirm.
+Windows and X11 are next; nothing here is published yet.
 
 ```bash
-pixelactions plan flow.toml     # resolve every step, act on nothing
-pixelactions doctor             # platform, permissions, sister tool
+pixelactions plan flow.toml       # resolve every step, act on nothing
+pixelactions run flow.toml --yes  # perform it, verifying each step
+pixelactions doctor --probe       # prove input permission, harmlessly
 ```
 
 ```toml
@@ -37,7 +36,34 @@ target = "submit"
 [[step]]
 action = "type"
 text = "hello@example.com"
+
+[[step]]
+action = "wait_for"
+target = "confirmation"
 ```
+
+## What makes it different
+
+- **It acts where regions are *now*.** Before running, every target is
+  re-located against a fresh capture; a region that moved yields
+  corrected coordinates, so a session captured last month still works.
+- **It refuses rather than guesses.** A region that can't be found
+  unambiguously stops the run before anything is injected. A corrected
+  point that lands outside its own marked region is refused too — that
+  combination means the crop matched something else.
+- **It distinguishes "executed" from "verified".** The OS accepting an
+  event is not the app reacting to one, and the report says which
+  happened.
+- **Waiting is observable, not hopeful.** `wait_for` polls with real
+  captures instead of sleeping and hoping.
+- **Exit codes are the API**: 0 done, 1 a step failed, 2 malformed
+  question, 3 refused.
+
+## Documentation
+
+- [docs/FLOW.md](docs/FLOW.md) — the flow file: every step and setting
+- [docs/CLI.md](docs/CLI.md) — commands, flags, and the exit-code contract
+- [docs/OUTPUT.md](docs/OUTPUT.md) — run, plan, and doctor reports
 
 ## Design
 

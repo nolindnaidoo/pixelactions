@@ -15,8 +15,9 @@ verification (`assert`). **pixelactions consumes that ground truth and
 performs the interactions** — click, type, chord, drag — declaratively,
 and confirms they landed.
 
-Current scope: **macOS**, resolution and reporting. Injection is the
-next milestone. See `design/07-MILESTONES.md`.
+Current scope: **macOS**, the full loop — resolve, re-locate, act,
+verify. Windows and X11 are the next milestone. See
+`design/07-MILESTONES.md`.
 
 ## Layout
 
