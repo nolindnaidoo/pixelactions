@@ -11,6 +11,7 @@ mod inject;
 #[cfg(target_os = "macos")]
 mod mac;
 mod run;
+mod serve;
 mod session;
 mod verify;
 
@@ -23,7 +24,7 @@ use pixelactions_core::plan::{Plan, plan};
 /// Exit codes are the API (same contract as the sister tool, plus 3):
 /// 0 done · 1 a step failed honestly · 2 malformed question · 3 refused.
 const EXIT_MALFORMED: i32 = 2;
-const EXIT_REFUSED: i32 = 3;
+pub const EXIT_REFUSED: i32 = 3;
 
 fn main() {
     let cli = cli::Cli::parse();
@@ -58,6 +59,7 @@ fn main() {
             json,
             yes,
         ),
+        cli::Command::Serve { session } => serve::run(&expand_home(&session.display().to_string())),
         cli::Command::Doctor { json, probe } => doctor::run(json, probe),
     };
     match result {
@@ -74,7 +76,8 @@ fn main() {
 fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
     if !cfg!(target_os = "macos") {
         eprintln!(
-            "pixelactions: input synthesis is macOS-only in this build —              `plan` works everywhere"
+            "pixelactions: input synthesis is macOS-only in this build — \
+             `plan` works everywhere"
         );
         return Ok(EXIT_REFUSED);
     }
@@ -141,26 +144,21 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
 }
 
 #[cfg(target_os = "macos")]
-fn make_injector() -> Result<Box<dyn inject::Injector>> {
+pub fn make_injector() -> Result<Box<dyn inject::Injector>> {
     Ok(Box::new(inject::RealInjector::new()?))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn make_injector() -> Result<Box<dyn inject::Injector>> {
+pub fn make_injector() -> Result<Box<dyn inject::Injector>> {
     anyhow::bail!("input synthesis is not implemented for this platform yet")
 }
 
 fn print_report(report: &pixelactions_core::report::RunReport) {
-    use pixelactions_core::report::StepOutcome;
     println!("session: {}", report.session);
     println!();
     for step in &report.steps {
-        let mark = match step.outcome {
-            StepOutcome::Verified => "verified",
-            StepOutcome::Executed => "executed",
-            StepOutcome::Skipped => "skipped ",
-            StepOutcome::Failed => "FAILED  ",
-        };
+        // Padded to a fixed width so the step list reads as a column.
+        let mark = format!("{:<8}", step.outcome.name());
         println!(
             "  {} {:>2}. {} ({} ms)",
             mark,

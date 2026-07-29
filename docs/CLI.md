@@ -12,10 +12,42 @@ Exit codes are the API everywhere:
 Splitting 3 from 2 matters: "I can't do this here" is operationally
 different from "you asked wrong", and a CI job wants to tell them apart.
 
+## Where steps come from
+
+Two spellings, one meaning. A flow file and a chain of argv verbs build
+the *same* `Flow`, so resolution, relocation, bounds, and verification
+are identical either way — and learning one teaches the other.
+
+```bash
+pixelactions run --flow signup.toml --yes
+pixelactions run --session DIR click:submit type:"hi" key:cmd+s wait:done --yes
+```
+
+| Argv verb | Flow action |
+|---|---|
+| `click:LABEL` | `click` |
+| `double:LABEL` | `double_click` |
+| `drag:FROM>TO` | `drag` |
+| `type:TEXT` | `type` |
+| `key:CHORD` | `key` |
+| `verify:LABEL` | `verify` |
+| `wait:LABEL` | `wait_for` |
+| `gone:LABEL` | `wait_gone` |
+| `pause:MS` | `pause` |
+
+`type:` keeps everything after the first colon, so
+`type:"time: 10:30"` types the whole string. A chain is parsed
+all-or-nothing: one bad verb fails the invocation before anything runs.
+
+Chaining exists because a chained run does **one** relocation pass
+instead of one per invocation — and because process spawn, while cheap
+(~3 ms), is not free.
+
 ## `plan`
 
 ```
-pixelactions plan <FLOW> [--json] [--space auto|physical|logical]
+pixelactions plan [--flow FILE | --session DIR VERB:ARG...] [--json]
+                  [--space auto|physical|logical]
 ```
 
 Resolve every step and print what would happen — each coordinate after
@@ -26,7 +58,7 @@ before anything moves is how a wrong click gets caught.
 ## `run`
 
 ```
-pixelactions run <FLOW> [--json] --yes
+pixelactions run [--flow FILE | --session DIR VERB:ARG...] [--json] --yes
 ```
 
 Perform the flow. Without `--yes` it prints what it would do and exits 3
@@ -40,6 +72,24 @@ recorded as skipped rather than silently dropped.
 
 `--json` emits a run report: per step, the points **actually used**
 (corrections included), the outcome, timing, and the failure detail.
+
+## `serve`
+
+```
+pixelactions serve --session DIR
+```
+
+Speak the line protocol on stdin/stdout — one JSON request per line, one
+JSON response back — so a program in any language owns the loop and
+pixelactions does the steps. **stdout carries protocol messages only;
+logs go to stderr.** Closing stdin ends the session, as does `bye`.
+
+Full reference, including a Python client: [PROTOCOL.md](PROTOCOL.md).
+
+Reach for it when a flow can't express the job: branching on what's on
+screen, retrying with different data, reading rows from a CSV, calling an
+API between steps. Below that bar, chained argv is simpler and has
+nothing to keep in sync.
 
 ## `doctor`
 

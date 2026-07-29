@@ -16,18 +16,26 @@ performs the interactions** — click, type, chord, drag — declaratively,
 and confirms they landed.
 
 Current scope: **macOS**, the full loop — resolve, re-locate, act,
-verify. Windows and X11 are the next milestone. See
+verify — driven three ways: chained argv, flow files, and the `serve`
+line protocol. Windows and X11 are the next milestone. See
 `design/07-MILESTONES.md`.
+
+**The three surfaces are one implementation.** Chained verbs and a
+protocol request both build the same `Flow` and go through the same
+`plan` → `run::execute` path. When adding behavior, add it there — a
+surface that grows its own copy of relocation, bounds, or verification
+is a bug, because the three will drift and only one will be tested.
 
 ## Layout
 
 - `crates/pixelactions-core` — pure logic: flow schema, plan resolution,
-  coordinate-space conversion, run reports. **Zero platform deps,
+  coordinate-space conversion, run reports, argv verb parsing, and the
+  line protocol's wire types. **Zero platform deps,
   `#![forbid(unsafe_code)]`, everything unit-tested.** If a platform
   type (`enigo`, Core Graphics, Win32) appears here, that is a bug.
 - `crates/pixelactions` — the binary: CLI, session loading, calling
-  pixelcoords, and (next) input synthesis. Platform-specific code lives
-  in cfg-gated modules.
+  pixelcoords, input synthesis, and the `serve` loop. Platform-specific
+  code lives in cfg-gated modules.
 
 Keep modules flat. No layers, registries, managers, or services. No
 trait with a single implementation.
@@ -114,8 +122,12 @@ need:
   nothing.
 - **Reports distinguish "executed" from "verified".** "Nothing errored"
   is not "it worked", and the wire format says which.
-- Injection, when it lands, gets a kill switch, a watchdog, and bounds
-  enforcement before it gets convenience features.
+- Injection got a watchdog and bounds enforcement before it got
+  convenience features; the kill switch is still owed.
+- **`serve` listens on stdio and nowhere else.** No socket, no port, no
+  daemon. This process holds the permission to click and type; a
+  listener would lend that permission to anything that can reach it.
+  This is not a default to revisit — see `design/05-NON-GOALS.md`.
 
 ## Testing
 

@@ -6,9 +6,8 @@ coordinates, perform the interaction, confirm it landed.**
 [pixelcoords](https://github.com/nolindnaidoo/pixelcoords) freezes your
 screen, lets you mark labeled regions, and writes pixel-exact
 coordinates with crops, drift re-location, and point verification.
-pixelactions reads that session and acts on it — declaratively, from a
-file that references regions by **label**, never by raw coordinate, so
-a flow survives the UI moving.
+pixelactions reads that session and acts on it — referencing regions by
+**label**, never by raw coordinate, so a run survives the UI moving.
 
 ```
 find  →  act  →  assert
@@ -20,27 +19,78 @@ find  →  act  →  assert
 its click point, re-locate it against a fresh capture, act, and confirm.
 Windows and X11 are next; nothing here is published yet.
 
+## Three ways to drive it
+
+One binary, three surfaces, ranked. **Most people want the first.** Here
+is the same task in each — fill a field and confirm the result.
+
+### 1. Command line
+
 ```bash
-pixelactions plan flow.toml       # resolve every step, act on nothing
-pixelactions run flow.toml --yes  # perform it, verifying each step
-pixelactions doctor --probe       # prove input permission, harmlessly
+pixelactions run --session ~/captures/checkout \
+  click:email type:"a@b.com" key:enter verify:success --yes
 ```
 
+Nothing to install, nothing to keep in sync. Verbs chain in one
+invocation, which also means **one** relocation pass for the whole
+sequence.
+
+### 2. A flow file
+
 ```toml
-session = "~/Downloads/pixelcoords-captures/20260728-182121-117"
+session = "~/captures/checkout"
 
 [[step]]
 action = "click"
-target = "submit"
+target = "email"
 
 [[step]]
 action = "type"
-text = "hello@example.com"
+text = "a@b.com"
 
 [[step]]
-action = "wait_for"
-target = "confirmation"
+action = "key"
+chord = "enter"
+
+[[step]]
+action = "verify"
+target = "success"
 ```
+
+```bash
+pixelactions plan --flow checkout.toml       # every coordinate, acts on nothing
+pixelactions run  --flow checkout.toml --yes
+```
+
+Same verbs as the command line. Reviewable in a diff — a pull request
+shows *click submit*, not arithmetic.
+
+### 3. The line protocol
+
+```python
+ui.send(do="click", target="email")
+ui.send(do="type", text=row["email"])
+ui.send(do="key", chord="enter")
+if ui.send(do="verify", target="success")["outcome"] != "verified":
+    failures.append(row)
+```
+
+```bash
+pixelactions serve --session ~/captures/checkout
+```
+
+One long-lived process speaking JSON on stdin/stdout, so **a program in
+any language owns the loop** — branching on what's on screen, retrying
+with different data, reading a CSV, calling an API between steps. The
+client above is forty lines of stdlib Python, in
+[docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+Escalate on a symptom, not a feature list: one command, then chained
+commands, then the protocol when you need loops, branching, and data.
+
+**There is no embedded interpreter, and never will be.** Your bot is
+written in your language, which is why this works with all of them
+instead of the two we could afford to embed.
 
 ## What makes it different
 
@@ -55,15 +105,18 @@ target = "confirmation"
   event is not the app reacting to one, and the report says which
   happened.
 - **Waiting is observable, not hopeful.** `wait_for` polls with real
-  captures instead of sleeping and hoping.
+  captures and returns the instant the condition holds. No sleeps, at
+  any layer, including the protocol.
 - **Exit codes are the API**: 0 done, 1 a step failed, 2 malformed
   question, 3 refused.
 
 ## Documentation
 
 - [docs/FLOW.md](docs/FLOW.md) — the flow file: every step and setting
-- [docs/CLI.md](docs/CLI.md) — commands, flags, and the exit-code contract
+- [docs/CLI.md](docs/CLI.md) — commands, chained verbs, exit codes
+- [docs/PROTOCOL.md](docs/PROTOCOL.md) — the line protocol, with a client
 - [docs/OUTPUT.md](docs/OUTPUT.md) — run, plan, and doctor reports
+- [SKILL.md](SKILL.md) — for coding agents driving this tool
 
 ## Design
 

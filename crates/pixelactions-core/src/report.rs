@@ -24,6 +24,21 @@ pub enum StepOutcome {
     Failed,
 }
 
+impl StepOutcome {
+    /// The wire name, for printing and for the line protocol. Kept beside
+    /// the serde attribute so the two can't drift apart — a client that
+    /// matches on the JSON sees exactly what a human reading the terminal
+    /// sees.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Executed => "executed",
+            Self::Skipped => "skipped",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 /// One step's record.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepReport {
@@ -120,6 +135,19 @@ mod tests {
         let verified = serde_json::to_string(&StepOutcome::Verified).expect("serialize");
         assert_eq!(executed, "\"executed\"");
         assert_eq!(verified, "\"verified\"");
+    }
+
+    #[test]
+    fn the_printed_name_is_the_wire_name() {
+        for outcome in [
+            StepOutcome::Verified,
+            StepOutcome::Executed,
+            StepOutcome::Skipped,
+            StepOutcome::Failed,
+        ] {
+            let json = serde_json::to_string(&outcome).expect("serialize");
+            assert_eq!(json, format!("\"{}\"", outcome.name()));
+        }
     }
 
     #[test]

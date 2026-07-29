@@ -12,5 +12,6 @@
 pub mod convert;
 pub mod flow;
 pub mod plan;
+pub mod protocol;
 pub mod report;
 pub mod verb;

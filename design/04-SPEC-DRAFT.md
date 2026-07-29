@@ -56,8 +56,17 @@ Open questions this format has to answer:
   grows control flow it becomes a scripting language, and the market is
   full of those. A flow that needs branching should be driven by a real
   program calling pixelactions per step.
+  **Answered:** no, and the `serve` line protocol is how a real program
+  does the driving. See `10-PROGRAMMABILITY-SPEC.md`.
 
 ## CLI surface (mirrors pixelcoords' shape deliberately)
+
+> **Superseded by what shipped** — see [`docs/CLI.md`](../docs/CLI.md).
+> The sketch below is kept as the record of the thinking. What changed:
+> `--dry-run` became the `plan` subcommand (a mode you can forget is a
+> mode you will forget), the one-shot `do` became chained
+> `verb:argument` arguments to `run`, and `serve` was added for
+> programmatic drivers.
 
 ```
 pixelactions run <flow.toml> [--dry-run] [--json] [--log FILE]

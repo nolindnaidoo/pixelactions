@@ -128,7 +128,7 @@ fn poll_until(
 /// outside every described monitor, simply gets no correction — the flow
 /// then acts on the saved coordinate, which preflight already confirmed
 /// still matches.
-fn corrections(
+pub fn corrections(
     report: &verify::FindReport,
     targets: &[&str],
     monitors: &[MonitorRecord],

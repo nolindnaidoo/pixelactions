@@ -15,23 +15,28 @@ not prerequisites — with one exception worth landing when convenient:
 which collapses find + click-point + space conversion into the single
 call an executor actually wants.
 
-**Scope:** `pixelactions run flow.toml` on macOS, against a pixelcoords
-session, with:
+**Scope:** perform a flow on macOS against a pixelcoords session, with:
 
 - label → coordinate resolution (physical px → logical points via the
   containing display's scale — the conversion that makes it correct)
-- actions: `click`, `type`, `key`, `drag`, `scroll`
+- actions: `click`, `double_click`, `type`, `key`, `drag`
 - `relocate = true` — call pixelcoords `find` first, act on corrected
   coordinates, refuse to act if a region is missing or ambiguous
 - `verify` — call pixelcoords `find --label X` after a step (it
   captures; `assert` does not)
-- `--dry-run` printing every resolved coordinate and mechanism
+- `plan` printing every resolved coordinate and mechanism, acting on
+  nothing — permanent, not a phase
 - `--json` run report; exit codes 0/1/2/3
 - `doctor` — Accessibility grant state, displays, scale factors
 
-**Deliberately out:** Windows, Linux, MCP, `wait_for` polling, bounds
-enforcement beyond "target must exist", kill-switch (dry-run and short
-flows carry the safety load at this size).
+**Landed here rather than later**, because each turned out to be small
+once the run loop existed: `wait_for` / `wait_gone` polling, bounds
+enforcement, the watchdog, and all three drive surfaces (chained argv,
+flow files, `serve`).
+
+**Deliberately out:** Windows, Linux, MCP, `scroll`, the kill-switch
+listener thread (dry-run, bounds, and the watchdog carry the safety load
+at this size).
 
 **Why macOS first:** it's the dev machine, it has the nastiest
 coordinate conversion (Retina/scaled/multi-display), and getting it
@@ -54,15 +59,16 @@ platforms, and CI proves it on a headed runner where possible.
 
 ## 0.3.0 — safety and orchestration
 
-`wait_for` (observable polling, not sleeps), bounds enforcement, the
-kill-switch listener thread, watchdog timeout, audit log. This is what
-makes it trustworthy for unattended runs — the difference between a
-convenience and something you'd let an agent drive.
+What remains here after the early landings above: the kill-switch
+listener thread and an audit log. Observable polling, bounds
+enforcement, and the watchdog shipped in 0.1.0. This is what makes it
+trustworthy for unattended runs — the difference between a convenience
+and something you'd let an agent drive.
 
-## 0.3.5 — programmability (see 10-PROGRAMMABILITY-SPEC.md)
+## ~~0.3.5~~ — programmability (shipped in 0.1.0; see 10-PROGRAMMABILITY-SPEC.md)
 
-Argv chaining, then `serve` (NDJSON over stdio), then a `SKILL.md` for
-agents. Deliberately before the MCP question, because the CLI surface
+Argv chaining, `serve` (NDJSON over stdio), and `SKILL.md` all landed
+early. Deliberately before the MCP question, because the CLI surface
 reaches strictly more agents than a stdio MCP server does.
 
 ## 0.4.0 — the agent surface

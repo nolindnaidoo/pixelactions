@@ -7,6 +7,7 @@ Examples:
   pixelactions run --session DIR click:submit type:\"hi\" key:cmd+s wait:done --yes
   pixelactions plan --flow flow.toml     resolve every step, act on nothing
   pixelactions run --flow flow.toml --yes
+  pixelactions serve --session DIR       drive it from your own program
   pixelactions doctor --probe            prove input permission, harmlessly
 
 Verbs: click double verify wait gone type key drag:FROM>TO pause:MS
@@ -67,6 +68,15 @@ pub enum Command {
         /// Actually perform the flow. Without this, nothing is injected.
         #[arg(long)]
         yes: bool,
+    },
+    /// Speak the line protocol on stdin/stdout: one JSON request per
+    /// line, one JSON response back. This is how a program in any
+    /// language drives pixelactions — it owns the loop, we do the steps.
+    /// Logs go to stderr; stdout is protocol only.
+    Serve {
+        /// Session directory to act against
+        #[arg(long, value_name = "DIR")]
+        session: PathBuf,
     },
     /// Check what pixelactions needs to run: OS support, input
     /// permission, displays, and the pixelcoords binary it calls.
