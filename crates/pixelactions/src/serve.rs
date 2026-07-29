@@ -69,6 +69,9 @@ pub fn run(session_directory: &Path) -> Result<i32> {
             "input synthesis is macOS-only in this build — `plan` works everywhere",
         ));
     }
+    if let Err(reason) = crate::doctor::require_supported_pixelcoords() {
+        return Ok(refuse_on_stdout(&reason));
+    }
     let session = match session::load(session_directory) {
         Ok(session) => session,
         Err(error) => return Ok(refuse_on_stdout(&format!("{error:#}"))),

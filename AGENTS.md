@@ -61,7 +61,11 @@ must never break the other, which is enforced structurally:
   silently skipped step. Tolerance is for other people's data, not ours.
 - **Versions are checked, not assumed.** `doctor` reports the installed
   pixelcoords version and the session schema this build understands. A
-  session from the future is refused with a message naming the fix.
+  session from the future is refused with a message naming the fix, and a
+  pixelcoords older than `doctor::MIN_PIXELCOORDS` is refused before
+  anything runs — on both `run` and `serve`. Raise that constant whenever
+  this tool starts depending on a fix over there, and say in its doc
+  comment *which* fix, so the number is auditable rather than folklore.
 - **Capture-time work belongs to pixelcoords.** We shell out to its
   binary for `find`; we never reimplement capture, geometry, or template
   matching. If something is missing there, the fix belongs there.

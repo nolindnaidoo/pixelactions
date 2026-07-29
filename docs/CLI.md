@@ -120,7 +120,14 @@ pixelactions doctor [--json] [--probe]
 
 Reports the platform, the coordinate space its input API expects, the
 session schema this build understands, the pixelcoords binary it will
-call, and — on macOS — whether Accessibility is granted.
+call and whether it is new enough, and — on macOS — whether Accessibility
+is granted.
+
+`run` and `serve` enforce that minimum themselves before doing anything,
+exiting 3 with the reason. It is not advisory: below the minimum,
+pixelcoords composited the mouse pointer into captures, and since this
+tool parks the pointer on whatever it just clicked, relocation failed in a
+way that looks like flakiness rather than a version problem.
 
 `--probe` proves input permission instead of assuming it: it reads the
 cursor position, moves it one pixel, asks the OS where it ended up, and
