@@ -319,6 +319,7 @@ fn acts_on_screen(step: &Step) -> bool {
         Step::Click { .. }
             | Step::DoubleClick { .. }
             | Step::Drag { .. }
+            | Step::Scroll { .. }
             | Step::Type { .. }
             | Step::Key { .. }
     )

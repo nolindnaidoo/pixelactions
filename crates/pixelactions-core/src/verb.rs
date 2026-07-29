@@ -10,7 +10,7 @@
 //! learning either teaches the other. That rule is borrowed from tmux's
 //! control mode: the protocol's verbs *are* the command set.
 
-use crate::flow::Step;
+use crate::flow::{Axis, Step};
 
 /// Why a chained argument could not be read as a step.
 #[derive(Debug, thiserror::Error, PartialEq)]
@@ -18,13 +18,19 @@ pub enum VerbError {
     #[error("{0:?} is not verb:argument — try click:submit, type:\"hello\", or wait:done")]
     Malformed(String),
     #[error(
-        "unknown verb {0:?} — expected click, double, drag, type, key, verify, wait, gone, or pause"
+        "unknown verb {0:?} — expected click, double, drag, scroll, hscroll, type, key, \
+         verify, wait, gone, or pause"
     )]
     Unknown(String),
     #[error("drag needs from>to, e.g. drag:handle>dropzone (got {0:?})")]
     DragShape(String),
     #[error("pause needs milliseconds, e.g. pause:250 (got {0:?})")]
     PauseValue(String),
+    #[error(
+        "{0} needs label>amount, e.g. {0}:results>3 to go one way and {0}:results>-3 the \
+         other (got {1:?})"
+    )]
+    ScrollShape(String, String),
     #[error("{0} needs a label, e.g. {0}:submit")]
     EmptyLabel(String),
 }
@@ -75,6 +81,8 @@ pub fn parse(argument: &str) -> Result<Step, VerbError> {
                 to: to.trim().to_string(),
             }
         }
+        "scroll" => scroll(verb, rest, Axis::Vertical)?,
+        "hscroll" => scroll(verb, rest, Axis::Horizontal)?,
         "pause" => {
             let ms = rest
                 .trim()
@@ -85,6 +93,31 @@ pub fn parse(argument: &str) -> Result<Step, VerbError> {
         other => return Err(VerbError::Unknown(other.to_string())),
     };
     Ok(step)
+}
+
+/// `LABEL>AMOUNT` for a scroll, on the axis the verb chose.
+///
+/// The amount is required rather than defaulted: it is already the least
+/// predictable value in the tool, and silently picking one for the
+/// caller would make an unpredictable thing invisible too.
+fn scroll(verb: &str, rest: &str, axis: Axis) -> Result<Step, VerbError> {
+    let shape = || VerbError::ScrollShape(verb.to_string(), rest.to_string());
+    let Some((target, amount)) = rest.split_once('>') else {
+        return Err(shape());
+    };
+    let target = target.trim();
+    if target.is_empty() {
+        return Err(shape());
+    }
+    let amount: i32 = amount.trim().parse().map_err(|_| shape())?;
+    if amount == 0 {
+        return Err(shape());
+    }
+    Ok(Step::Scroll {
+        target: target.to_string(),
+        amount,
+        axis,
+    })
 }
 
 /// Parse every argument, or fail on the first bad one.
@@ -110,6 +143,43 @@ fn label(verb: &str, rest: &str) -> Result<String, VerbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_chains_as_label_then_amount() {
+        assert_eq!(
+            parse("scroll:results>-3").expect("valid"),
+            Step::Scroll {
+                target: "results".into(),
+                amount: -3,
+                axis: crate::flow::Axis::Vertical,
+            }
+        );
+        assert_eq!(
+            parse("hscroll:timeline>5").expect("valid"),
+            Step::Scroll {
+                target: "timeline".into(),
+                amount: 5,
+                axis: crate::flow::Axis::Horizontal,
+            }
+        );
+    }
+
+    #[test]
+    fn a_scroll_without_an_amount_is_refused() {
+        for bad in [
+            "scroll:results",
+            "scroll:>3",
+            "scroll:results>",
+            "scroll:results>lots",
+        ] {
+            assert!(parse(bad).is_err(), "should refuse {bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_scroll_of_zero_is_refused_rather_than_silently_doing_nothing() {
+        assert!(parse("scroll:results>0").is_err());
+    }
 
     #[test]
     fn every_verb_maps_to_its_flow_action() {

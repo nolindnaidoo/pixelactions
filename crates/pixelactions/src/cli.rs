@@ -10,7 +10,8 @@ Examples:
   pixelactions serve --session DIR       drive it from your own program
   pixelactions doctor --probe            prove input permission, harmlessly
 
-Verbs: click double verify wait gone type key drag:FROM>TO pause:MS
+Verbs: click double verify wait gone type key drag:FROM>TO
+       scroll:LABEL>N hscroll:LABEL>N pause:MS
 They mirror the flow file's actions one-for-one, so learning either
 teaches the other.
 

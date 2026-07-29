@@ -32,6 +32,7 @@ never a silently skipped step.
 | `click` | `target` | Move to the region's click point and click |
 | `double_click` | `target` | The same, twice, inside the OS double-click window |
 | `drag` | `from`, `to` | Press at one region, interpolate motion, release at another |
+| `scroll` | `target`, `amount`, `axis?` | Hover a region and turn the wheel over it |
 | `type` | `text` | Type literal text through the platform's Unicode path |
 | `key` | `chord` | Press a chord, e.g. `cmd+shift+s` |
 | `verify` | `target` | Confirm the region still matches its saved crop |
@@ -51,6 +52,47 @@ character.
 finishes reacting. `settle_ms` exists for the small gaps hardware needs;
 when you actually need to know something happened, use `wait_for` — it
 polls with real captures and tells the truth.
+
+## Scrolling
+
+```toml
+[[step]]
+action = "scroll"
+target = "results"   # what to hover — a wheel event goes under the cursor
+amount = -3          # 15° wheel clicks; positive down/right, negative up/left
+axis = "vertical"    # optional; "horizontal" for side-scrolling panes
+```
+
+Two things make `scroll` unlike every other step.
+
+**`amount` is the one value in this tool that is not exact.** It counts
+wheel clicks, and how far a click travels depends on the reader's own OS
+scroll-speed setting. The same flow moves a different distance on a
+different machine. Nothing can convert it, the way coordinates are
+converted — so do not write flows that depend on landing somewhere
+precise.
+
+**A scroll is never verified against its own region.** It changes that
+region on purpose, so checking the crop would fail exactly when the step
+worked. A scroll always reports `executed`, even under
+`verify = "each"`. Confirm it with a `wait_for` on whatever it was
+supposed to bring into view:
+
+```toml
+[[step]]
+action = "scroll"
+target = "results"
+amount = 3
+
+[[step]]
+action = "wait_for"
+target = "footer"
+```
+
+Because the amount is advisory, the reliable pattern is to scroll *until
+something appears* rather than by a fixed distance — which needs a loop,
+and a flow file has none by design. That is a job for
+[the line protocol](PROTOCOL.md).
 
 ## Settings
 

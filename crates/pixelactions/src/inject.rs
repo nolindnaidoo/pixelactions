@@ -13,6 +13,7 @@
 //! in core and is property-tested.
 
 use anyhow::{Context, Result};
+use pixelactions_core::flow::Axis;
 
 /// A mouse button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +37,13 @@ pub trait Injector {
     /// Press a chord such as `cmd+s`: modifiers held, key tapped,
     /// modifiers released in reverse.
     fn chord(&mut self, chord: &str) -> Result<()>;
+    /// Turn the wheel `amount` 15° clicks at the current pointer
+    /// position. Positive is down (or right); negative is up (or left).
+    ///
+    /// Unlike every other method here, the argument is not a coordinate
+    /// and has no exact meaning — the distance travelled depends on the
+    /// reader's own OS scroll-speed setting.
+    fn scroll(&mut self, amount: i32, axis: Axis) -> Result<()>;
 
     /// Where the cursor is now, in the platform's own input space.
     ///
@@ -110,6 +118,14 @@ impl Injector for Recording {
         self.events.push(format!("chord {chord}"));
         Ok(())
     }
+    fn scroll(&mut self, amount: i32, axis: Axis) -> Result<()> {
+        let way = match axis {
+            Axis::Vertical => "v",
+            Axis::Horizontal => "h",
+        };
+        self.events.push(format!("scroll {way}{amount}"));
+        Ok(())
+    }
     fn cursor(&mut self) -> Result<(f64, f64)> {
         Ok(self.cursor)
     }
@@ -139,8 +155,10 @@ pub use platform::RealInjector;
 mod platform {
     use anyhow::{Context, Result, anyhow};
     use enigo::{
-        Button as EnigoButton, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings,
+        Axis as EnigoAxis, Button as EnigoButton, Coordinate, Direction, Enigo, Key, Keyboard,
+        Mouse, Settings,
     };
+    use pixelactions_core::flow::Axis;
 
     use super::{Button, Injector, split_chord};
 
@@ -245,6 +263,16 @@ mod platform {
             self.enigo
                 .text(text)
                 .map_err(|e| anyhow!("typing failed: {e}"))
+        }
+
+        fn scroll(&mut self, amount: i32, axis: Axis) -> Result<()> {
+            let axis = match axis {
+                Axis::Vertical => EnigoAxis::Vertical,
+                Axis::Horizontal => EnigoAxis::Horizontal,
+            };
+            self.enigo
+                .scroll(amount, axis)
+                .map_err(|e| anyhow!("cannot scroll: {e}"))
         }
 
         fn cursor(&mut self) -> Result<(f64, f64)> {

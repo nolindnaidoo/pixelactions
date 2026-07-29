@@ -28,6 +28,18 @@ pub enum Verify {
     None,
 }
 
+/// Which way a scroll goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Axis {
+    /// Up and down. Positive amounts scroll **down**, matching every
+    /// platform's own wheel convention.
+    #[default]
+    Vertical,
+    /// Left and right, for side-scrolling panes. Positive scrolls right.
+    Horizontal,
+}
+
 /// What a step does.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
@@ -43,6 +55,20 @@ pub enum Step {
     Key { chord: String },
     /// Press at one region's point, move, release at another's.
     Drag { from: String, to: String },
+    /// Hover a region and turn the wheel over it.
+    ///
+    /// `target` picks *what* to scroll — a wheel event goes to whatever
+    /// is under the cursor — and resolves exactly like a click's does.
+    /// `amount` is the one quantity in this tool that is **not**
+    /// exact: it counts 15° wheel clicks, and how far that moves depends
+    /// on the reader's own OS scroll-speed setting. Scroll until
+    /// something is visible (`wait_for`), never a fixed distance.
+    Scroll {
+        target: String,
+        amount: i32,
+        #[serde(default)]
+        axis: Axis,
+    },
     /// Confirm a labeled region still matches its saved crop.
     Verify { target: String },
     /// Poll until a labeled region matches its saved crop again, or the
@@ -65,6 +91,7 @@ impl Step {
         match self {
             Self::Click { target }
             | Self::DoubleClick { target }
+            | Self::Scroll { target, .. }
             | Self::Verify { target }
             | Self::WaitFor { target }
             | Self::WaitGone { target } => vec![target.as_str()],
@@ -81,6 +108,19 @@ impl Step {
             Self::Type { text } => format!("type {} chars", text.chars().count()),
             Self::Key { chord } => format!("key {chord}"),
             Self::Drag { from, to } => format!("drag {from} -> {to}"),
+            Self::Scroll {
+                target,
+                amount,
+                axis,
+            } => {
+                let way = match (axis, amount.is_negative()) {
+                    (Axis::Vertical, false) => "down",
+                    (Axis::Vertical, true) => "up",
+                    (Axis::Horizontal, false) => "right",
+                    (Axis::Horizontal, true) => "left",
+                };
+                format!("scroll {target} {way} {}", amount.abs())
+            }
             Self::Verify { target } => format!("verify {target}"),
             Self::WaitFor { target } => format!("wait for {target}"),
             Self::WaitGone { target } => format!("wait until {target} is gone"),
@@ -192,6 +232,57 @@ impl Flow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_scroll_step_reads_its_amount_and_defaults_to_vertical() {
+        let flow = Flow::parse(
+            "session = \"s\"\n\n[[step]]\naction = \"scroll\"\ntarget = \"results\"\namount = -3\n",
+        )
+        .expect("valid");
+        assert_eq!(
+            flow.steps[0],
+            Step::Scroll {
+                target: "results".into(),
+                amount: -3,
+                axis: Axis::Vertical,
+            }
+        );
+    }
+
+    #[test]
+    fn a_scroll_needs_an_amount_rather_than_guessing_one() {
+        // The least predictable value in the tool is the one place a
+        // silent default would hurt most.
+        let flow =
+            Flow::parse("session = \"s\"\n\n[[step]]\naction = \"scroll\"\ntarget = \"x\"\n");
+        assert!(flow.is_err(), "amount is required");
+    }
+
+    #[test]
+    fn a_scroll_names_the_direction_a_human_would_say() {
+        let down = Step::Scroll {
+            target: "list".into(),
+            amount: 3,
+            axis: Axis::Vertical,
+        };
+        let left = Step::Scroll {
+            target: "list".into(),
+            amount: -2,
+            axis: Axis::Horizontal,
+        };
+        assert_eq!(down.summary(), "scroll list down 3");
+        assert_eq!(left.summary(), "scroll list left 2");
+    }
+
+    #[test]
+    fn a_scroll_targets_the_region_it_hovers() {
+        let step = Step::Scroll {
+            target: "pane".into(),
+            amount: 1,
+            axis: Axis::Vertical,
+        };
+        assert_eq!(step.targets(), vec!["pane"]);
+    }
 
     const MINIMAL: &str = r#"
 session = "~/captures/20260728"

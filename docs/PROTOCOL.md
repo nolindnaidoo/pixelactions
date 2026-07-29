@@ -55,6 +55,7 @@ form of `action = "click"` — so there is one set of verbs to learn.
 | type | `{"do":"type","text":"hello@example.com"}` |
 | key | `{"do":"key","chord":"cmd+s"}` |
 | drag | `{"do":"drag","from":"card","to":"bin"}` |
+| scroll | `{"do":"scroll","target":"results","amount":3}` — optional `"axis":"horizontal"` |
 | verify | `{"do":"verify","target":"banner"}` |
 | wait for | `{"do":"wait_for","target":"confirmation"}` |
 | wait gone | `{"do":"wait_gone","target":"spinner"}` |
@@ -99,6 +100,23 @@ attempted.
 `points` carries the coordinates actually acted on, after conversion,
 with the monitor and scale they came from. Absent for steps that touch no
 region.
+
+## Scrolling until something appears
+
+`scroll` is the one verb that is meaningfully better here than in a flow
+file. Its `amount` counts wheel clicks and depends on the reader's OS
+scroll-speed setting, so a fixed distance is never reliable — you want to
+scroll *until* something is visible, and that needs a loop your language
+already has:
+
+```python
+while ui.send(do="verify", target="footer")["outcome"] != "verified":
+    ui.send(do="scroll", target="results", amount=3)
+```
+
+A scroll always answers `executed`, never `verified`: it changes its own
+region on purpose, so that region cannot confirm it. Confirm with a
+separate `verify` or `wait_for`, as above.
 
 ## The kill switch applies here too
 

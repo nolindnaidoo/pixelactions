@@ -43,12 +43,18 @@ pixelactions run --session DIR click:submit type:"hi" key:cmd+s wait:done --yes
 | `click:LABEL` | `click` |
 | `double:LABEL` | `double_click` |
 | `drag:FROM>TO` | `drag` |
+| `scroll:LABEL>N` | `scroll` (vertical) |
+| `hscroll:LABEL>N` | `scroll` (horizontal) |
 | `type:TEXT` | `type` |
 | `key:CHORD` | `key` |
 | `verify:LABEL` | `verify` |
 | `wait:LABEL` | `wait_for` |
 | `gone:LABEL` | `wait_gone` |
 | `pause:MS` | `pause` |
+
+`scroll:` borrows drag's `>`: `scroll:results>3` goes down, `-3` up.
+The amount is required — it is already the least predictable value in
+the tool, and defaulting it would hide that.
 
 `type:` keeps everything after the first colon, so
 `type:"time: 10:30"` types the whole string. A chain is parsed

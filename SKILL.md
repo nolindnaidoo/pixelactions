@@ -60,12 +60,20 @@ file's actions and to the protocol's `do` values.
 | `click:LABEL` | click that region's verified point |
 | `double:LABEL` | double-click it |
 | `drag:FROM>TO` | press at one region, release at another |
+| `scroll:LABEL>N` | hover a region and scroll it; `-N` scrolls the other way, `hscroll:` for sideways |
 | `type:TEXT` | type literal text (layout-independent; cannot express shortcuts) |
 | `key:CHORD` | press a chord, e.g. `cmd+s`, `ctrl+shift+p` |
 | `verify:LABEL` | confirm the region still matches its crop |
 | `wait:LABEL` | poll until it appears |
 | `gone:LABEL` | poll until it disappears |
 | `pause:MS` | fixed wait — a last resort, when nothing observable exists |
+
+**Scroll by feel, verify by sight.** A scroll's amount counts wheel
+clicks and depends on the user's OS scroll-speed setting, so it is never
+exact. Never scroll a computed distance — scroll a little and check, in a
+loop. A scroll always reports `executed`, never `verified`, because it
+changes its own region on purpose; confirm it with a separate `verify` or
+`wait:` on whatever should now be visible.
 
 **Wait, do not sleep.** `wait:` and `gone:` poll with real screen
 captures and return the instant the condition holds. A `pause:` where a

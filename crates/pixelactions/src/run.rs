@@ -132,16 +132,36 @@ fn failsafe_gate(
 }
 
 /// Bounds enforcement, honoring the flow's setting.
+///
+/// Only steps that actually inject are gated. The guard exists to stop
+/// the tool *acting* on a region it may have mis-matched; a `verify` or
+/// `wait_for` injects nothing, and refusing one would remove the exact
+/// primitive a caller needs to find out where things went.
 fn bounds_gate(
     flow: &Flow,
     planned: &pixelactions_core::plan::PlannedStep,
     corrections: &Corrections,
     monitors: &[MonitorRecord],
 ) -> Result<()> {
-    if !flow.settings.bounds {
+    if !flow.settings.bounds || !injects(&planned.step) {
         return Ok(());
     }
     check_bounds(planned, corrections, monitors)
+}
+
+/// Whether a step posts input, as opposed to only looking at the screen.
+fn injects(step: &Step) -> bool {
+    match step {
+        Step::Click { .. }
+        | Step::DoubleClick { .. }
+        | Step::Drag { .. }
+        | Step::Scroll { .. }
+        | Step::Type { .. }
+        | Step::Key { .. } => true,
+        Step::Verify { .. } | Step::WaitFor { .. } | Step::WaitGone { .. } | Step::Pause { .. } => {
+            false
+        }
+    }
 }
 
 /// Poll until a region is present (`want_present`) or absent, or the
@@ -474,6 +494,15 @@ fn perform(
             }
             injector.release(Button::Left)?;
         }
+        Step::Scroll { amount, axis, .. } => {
+            // Hover first: a wheel event goes to whatever is under the
+            // cursor, so the label picks the container to scroll exactly
+            // the way it picks the thing to click.
+            let point = first_point(planned, &points_for_step)?;
+            injector.move_to(point.0, point.1)?;
+            std::thread::sleep(settle);
+            injector.scroll(*amount, *axis)?;
+        }
         Step::Type { text } => injector.text(text)?,
         Step::Key { chord } => injector.chord(chord)?,
         Step::Pause { ms } => std::thread::sleep(Duration::from_millis(*ms)),
@@ -500,6 +529,15 @@ fn confirm(
     }
     if let Step::WaitGone { target } = step {
         return poll_until(flow, session, target, false, verifier);
+    }
+
+    // Scrolling changes what is on screen on purpose, so checking that
+    // its own region still matches the crop asks the wrong question and
+    // would fail exactly when the step worked. It is the one targeted
+    // step that reports `executed` and stops there; confirm a scroll
+    // with a `wait_for` on whatever it was meant to bring into view.
+    if matches!(step, Step::Scroll { .. }) {
+        return Ok(StepOutcome::Executed);
     }
 
     // A `verify` step always checks, whatever the run-wide setting — it
@@ -738,6 +776,9 @@ mod tests {
             fn chord(&mut self, _chord: &str) -> Result<()> {
                 Ok(())
             }
+            fn scroll(&mut self, _amount: i32, _axis: pixelactions_core::flow::Axis) -> Result<()> {
+                Ok(())
+            }
             fn cursor(&mut self) -> Result<(f64, f64)> {
                 bail!("no cursor here")
             }
@@ -769,6 +810,134 @@ mod tests {
         assert_eq!(report.exit_code(), 3);
         let detail = report.steps[0].detail.as_deref().unwrap_or_default();
         assert!(detail.contains("failsafe"), "names the setting: {detail}");
+    }
+
+    #[test]
+    fn looking_at_a_moved_region_is_never_refused_on_bounds() {
+        // The bounds guard stops the tool *acting* on a possible
+        // mis-match. A wait_for injects nothing, and refusing it would
+        // take away the one primitive that finds out where a region went
+        // — which is exactly what you reach for after a scroll.
+        let mut corrections = Corrections::new();
+        corrections.insert("submit".to_string(), point(9_000.0, 9_000.0));
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::WaitFor {
+                    target: "submit".into(),
+                },
+                vec![point(9_000.0, 9_000.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow_with(Verify::Each),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &corrections,
+            },
+            &mut always_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Verified);
+    }
+
+    #[test]
+    fn a_scroll_hovers_the_region_first_then_turns_the_wheel() {
+        let mut injector = Recording::default();
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Scroll {
+                    target: "results".into(),
+                    amount: -3,
+                    axis: pixelactions_core::flow::Axis::Vertical,
+                },
+                vec![point(100.0, 200.0)],
+            )],
+        };
+        execute(
+            &mut injector,
+            &Context {
+                flow: &flow_with(Verify::None),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut always_found(),
+        );
+        // Order matters: the wheel event goes wherever the cursor is, so
+        // hovering has to happen before the scroll, not after.
+        assert_eq!(injector.events, vec!["move 100,200", "scroll v-3"]);
+    }
+
+    #[test]
+    fn a_scroll_is_never_verified_against_its_own_region() {
+        // Scrolling changes that region on purpose. Checking it would
+        // fail precisely when the step worked, so the outcome is
+        // `executed` even under verify = "each".
+        let mut injector = Recording::default();
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Scroll {
+                    target: "results".into(),
+                    amount: 3,
+                    axis: pixelactions_core::flow::Axis::Vertical,
+                },
+                vec![point(100.0, 200.0)],
+            )],
+        };
+        let report = execute(
+            &mut injector,
+            &Context {
+                flow: &flow_with(Verify::Each),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            // Would report the region missing — and must not be consulted.
+            &mut never_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Executed);
+        assert_eq!(report.exit_code(), 0);
+    }
+
+    #[test]
+    fn a_scroll_still_obeys_the_kill_switch() {
+        let mut injector = Recording {
+            cursor: (1511.0, 981.0),
+            ..Default::default()
+        };
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Scroll {
+                    target: "results".into(),
+                    amount: 3,
+                    axis: pixelactions_core::flow::Axis::Vertical,
+                },
+                vec![point(100.0, 200.0)],
+            )],
+        };
+        let mut flow = flow_with(Verify::None);
+        flow.settings.space = Space::Logical;
+        let report = execute(
+            &mut injector,
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut always_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Refused);
+        assert!(injector.events.is_empty(), "nothing was injected");
     }
 
     #[test]

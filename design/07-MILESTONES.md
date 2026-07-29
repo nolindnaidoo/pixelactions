@@ -19,7 +19,7 @@ call an executor actually wants.
 
 - label → coordinate resolution (physical px → logical points via the
   containing display's scale — the conversion that makes it correct)
-- actions: `click`, `double_click`, `type`, `key`, `drag`
+- actions: `click`, `double_click`, `type`, `key`, `drag`, `scroll`
 - `relocate = true` — call pixelcoords `find` first, act on corrected
   coordinates, refuse to act if a region is missing or ambiguous
 - `verify` — call pixelcoords `find --label X` after a step (it
@@ -34,7 +34,7 @@ once the run loop existed: `wait_for` / `wait_gone` polling, bounds
 enforcement, the watchdog, the corner kill switch, and all three drive
 surfaces (chained argv, flow files, `serve`).
 
-**Deliberately out:** Windows, Linux, MCP, `scroll`.
+**Deliberately out:** Windows, Linux, MCP.
 
 **Why macOS first:** it's the dev machine, it has the nastiest
 coordinate conversion (Retina/scaled/multi-display), and getting it
