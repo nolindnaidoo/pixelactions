@@ -100,6 +100,28 @@ impl Step {
         }
     }
 
+    /// Whether this step posts input, as opposed to only looking at the
+    /// screen.
+    ///
+    /// The distinction decides which regions must be *present* before a
+    /// run starts. Acting on a region whose position cannot be trusted
+    /// clicks an unknown thing; looking for one that is absent is the
+    /// entire job of `wait_for`.
+    pub fn injects(&self) -> bool {
+        match self {
+            Self::Click { .. }
+            | Self::DoubleClick { .. }
+            | Self::Drag { .. }
+            | Self::Scroll { .. }
+            | Self::Type { .. }
+            | Self::Key { .. } => true,
+            Self::Verify { .. }
+            | Self::WaitFor { .. }
+            | Self::WaitGone { .. }
+            | Self::Pause { .. } => false,
+        }
+    }
+
     /// A short human label for reports and dry-run output.
     pub fn summary(&self) -> String {
         match self {
@@ -212,8 +234,23 @@ impl Flow {
 
     /// Every distinct label the flow references, in first-use order.
     pub fn targets(&self) -> Vec<&str> {
+        self.labels(|_| true)
+    }
+
+    /// The labels a run will actually *act on*, in first-use order.
+    ///
+    /// These are the ones that must be found before anything is
+    /// injected. The rest — a `wait_for` waiting for a dialog, a
+    /// `wait_gone` waiting for a spinner to clear — are by definition
+    /// allowed to be absent, and demanding them up front would make
+    /// those verbs impossible to use.
+    pub fn acting_targets(&self) -> Vec<&str> {
+        self.labels(Step::injects)
+    }
+
+    fn labels(&self, keep: impl Fn(&Step) -> bool) -> Vec<&str> {
         let mut seen = Vec::new();
-        for step in &self.steps {
+        for step in self.steps.iter().filter(|step| keep(step)) {
             for target in step.targets() {
                 if !seen.contains(&target) {
                     seen.push(target);
@@ -227,6 +264,48 @@ impl Flow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_injecting_steps_must_be_present_before_a_run() {
+        assert!(Step::Click { target: "a".into() }.injects());
+        assert!(Step::Type { text: "hi".into() }.injects());
+        assert!(
+            Step::Key {
+                chord: "cmd+s".into()
+            }
+            .injects()
+        );
+        assert!(
+            Step::Scroll {
+                target: "a".into(),
+                amount: 1,
+                axis: Axis::Vertical
+            }
+            .injects()
+        );
+        // Observation only — these read the screen and never move it.
+        assert!(!Step::Verify { target: "a".into() }.injects());
+        assert!(!Step::WaitFor { target: "a".into() }.injects());
+        assert!(!Step::WaitGone { target: "a".into() }.injects());
+        assert!(!Step::Pause { ms: 10 }.injects());
+    }
+
+    #[test]
+    fn a_wait_for_target_is_not_required_to_exist_up_front() {
+        // The regression: a flow that clicks one region and then waits
+        // for another used to demand *both* before starting, which made
+        // wait_for — the whole point of the verb — impossible to use.
+        let flow = Flow::parse(
+            "session = \"s\"\n\n\
+             [[step]]\naction = \"click\"\ntarget = \"submit\"\n\n\
+             [[step]]\naction = \"wait_for\"\ntarget = \"confirmation\"\n\n\
+             [[step]]\naction = \"wait_gone\"\ntarget = \"spinner\"\n",
+        )
+        .expect("valid");
+
+        assert_eq!(flow.targets(), vec!["submit", "confirmation", "spinner"]);
+        assert_eq!(flow.acting_targets(), vec!["submit"]);
+    }
 
     #[test]
     fn a_scroll_step_reads_its_amount_and_defaults_to_vertical() {
