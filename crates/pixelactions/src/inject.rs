@@ -12,7 +12,7 @@
 //! on each. That alignment is not luck — it's why the conversion lives
 //! in core and is property-tested.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use pixelactions_core::flow::Axis;
 
 /// A mouse button.
@@ -135,19 +135,6 @@ impl Injector for Recording {
     }
 }
 
-/// Split a chord into its modifiers and its final key: `cmd+shift+s` →
-/// `(["cmd", "shift"], "s")`. Platform-free, so it is tested here rather
-/// than behind a permission prompt.
-pub fn split_chord(chord: &str) -> Result<(Vec<&str>, &str)> {
-    let mut parts: Vec<&str> = chord
-        .split('+')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
-    let key = parts.pop().context("chord is empty")?;
-    Ok((parts, key))
-}
-
 #[cfg(target_os = "macos")]
 pub use platform::RealInjector;
 
@@ -160,7 +147,7 @@ mod platform {
     };
     use pixelactions_core::flow::Axis;
 
-    use super::{Button, Injector, split_chord};
+    use super::{Button, Injector};
 
     /// The real thing: enigo over Core Graphics.
     ///
@@ -314,7 +301,7 @@ mod platform {
         }
 
         fn chord(&mut self, chord: &str) -> Result<()> {
-            let (modifiers, key) = split_chord(chord)?;
+            let (modifiers, key) = pixelactions_core::chord::split(chord)?;
             let mut held = Vec::new();
             for token in &modifiers {
                 let modifier = key_for(token)?;
@@ -348,32 +335,5 @@ mod tests {
         injector.click(Button::Left).expect("recorded");
         injector.text("hi").expect("recorded");
         assert_eq!(injector.events, vec!["move 10,21", "click", "text hi"]);
-    }
-
-    #[test]
-    fn chords_split_into_modifiers_and_a_key() {
-        let (modifiers, key) = split_chord("cmd+shift+s").expect("valid");
-        assert_eq!(modifiers, vec!["cmd", "shift"]);
-        assert_eq!(key, "s");
-    }
-
-    #[test]
-    fn a_bare_key_has_no_modifiers() {
-        let (modifiers, key) = split_chord("enter").expect("valid");
-        assert!(modifiers.is_empty());
-        assert_eq!(key, "enter");
-    }
-
-    #[test]
-    fn whitespace_around_chord_parts_is_tolerated() {
-        let (modifiers, key) = split_chord("cmd + s").expect("valid");
-        assert_eq!(modifiers, vec!["cmd"]);
-        assert_eq!(key, "s");
-    }
-
-    #[test]
-    fn an_empty_chord_is_an_error() {
-        assert!(split_chord("").is_err());
-        assert!(split_chord("+").is_err());
     }
 }

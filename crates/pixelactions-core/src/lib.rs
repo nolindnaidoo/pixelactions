@@ -9,6 +9,7 @@
 //! that decides *where to click* must be testable without a screen.
 #![forbid(unsafe_code)]
 
+pub mod chord;
 pub mod convert;
 pub mod flow;
 pub mod plan;

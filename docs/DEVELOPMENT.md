@@ -79,6 +79,18 @@ Windows and Ubuntu build the platform-free core and prove nothing
 macOS-specific leaked into it. Injection is exercised nowhere in CI — it
 cannot be verified headless, and the tool says so rather than pretending.
 
+**Check the other platforms before pushing.** Development happens on
+macOS, where a helper reachable only from a `#[cfg(target_os = "macos")]`
+module still looks used — on Linux and Windows it is dead code, and
+clippy's `-D warnings` fails the build. Catch it locally:
+
+```bash
+rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
+cargo clippy --target x86_64-unknown-linux-gnu --workspace --all-targets -- -D warnings
+```
+
+Clippy only checks, so no cross-linker or system libraries are needed.
+
 ## Testing
 
 - Core is pure; everything in it is unit-tested, and the conversion —
