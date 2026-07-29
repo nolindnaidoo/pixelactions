@@ -95,10 +95,13 @@ fn run_flow(flow_path: &std::path::Path, json: bool, yes: bool) -> Result<i32> {
     let mut injector = make_injector()?;
     let report = run::execute(
         injector.as_mut(),
-        &flow,
-        &resolved,
-        &session_path,
-        &corrections,
+        &run::Context {
+            flow: &flow,
+            plan: &resolved,
+            session: &session_path,
+            monitors: &session.monitors,
+            corrections: &corrections,
+        },
         &mut verifier,
     );
 

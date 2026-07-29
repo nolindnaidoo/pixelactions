@@ -45,6 +45,17 @@ pub enum Step {
     Drag { from: String, to: String },
     /// Confirm a labeled region still matches its saved crop.
     Verify { target: String },
+    /// Poll until a labeled region matches its saved crop again, or the
+    /// timeout expires. The honest alternative to guessing with a sleep:
+    /// the OS accepts an event long before an app finishes reacting.
+    WaitFor { target: String },
+    /// Poll until a labeled region STOPS matching — "wait until this
+    /// spinner goes away", "wait until the button changes state".
+    WaitGone { target: String },
+    /// Wait a fixed duration. Present because some waits genuinely have
+    /// no observable, and pretending otherwise would push people to
+    /// sleep-and-hope outside the tool.
+    Pause { ms: u64 },
 }
 
 impl Step {
@@ -52,11 +63,13 @@ impl Step {
     /// action runs when one is missing.
     pub fn targets(&self) -> Vec<&str> {
         match self {
-            Self::Click { target } | Self::DoubleClick { target } | Self::Verify { target } => {
-                vec![target.as_str()]
-            }
+            Self::Click { target }
+            | Self::DoubleClick { target }
+            | Self::Verify { target }
+            | Self::WaitFor { target }
+            | Self::WaitGone { target } => vec![target.as_str()],
             Self::Drag { from, to } => vec![from.as_str(), to.as_str()],
-            Self::Type { .. } | Self::Key { .. } => Vec::new(),
+            Self::Type { .. } | Self::Key { .. } | Self::Pause { .. } => Vec::new(),
         }
     }
 
@@ -69,6 +82,9 @@ impl Step {
             Self::Key { chord } => format!("key {chord}"),
             Self::Drag { from, to } => format!("drag {from} -> {to}"),
             Self::Verify { target } => format!("verify {target}"),
+            Self::WaitFor { target } => format!("wait for {target}"),
+            Self::WaitGone { target } => format!("wait until {target} is gone"),
+            Self::Pause { ms } => format!("pause {ms}ms"),
         }
     }
 }
@@ -90,6 +106,15 @@ pub struct Settings {
     /// verification — the OS accepts an event long before an app has
     /// finished reacting to it.
     pub settle_ms: u64,
+    /// How long a `wait_for` / `wait_gone` step may poll before it fails.
+    pub timeout_ms: u64,
+    /// Milliseconds between polls while waiting. Each poll is a screen
+    /// capture, so this is a real cost, not a formality.
+    pub poll_ms: u64,
+    /// Refuse to act at a point that falls outside its own region's
+    /// bounds. On by default: the marked region is the guardrail, not
+    /// just the target.
+    pub bounds: bool,
 }
 
 impl Default for Settings {
@@ -99,6 +124,9 @@ impl Default for Settings {
             verify: Verify::Each,
             space: Space::Auto,
             settle_ms: 120,
+            timeout_ms: 10_000,
+            poll_ms: 400,
+            bounds: true,
         }
     }
 }
@@ -260,6 +288,39 @@ target = "b"
             Flow::parse(source).expect("valid").targets(),
             vec!["b", "a"]
         );
+    }
+
+    #[test]
+    fn waiting_and_pausing_parse() {
+        let source = r#"
+session = "s"
+
+[settings]
+timeout_ms = 3000
+poll_ms = 250
+
+[[step]]
+action = "wait_for"
+target = "dialog"
+
+[[step]]
+action = "wait_gone"
+target = "spinner"
+
+[[step]]
+action = "pause"
+ms = 500
+"#;
+        let flow = Flow::parse(source).expect("valid");
+        assert_eq!(flow.settings.timeout_ms, 3000);
+        assert_eq!(flow.settings.poll_ms, 250);
+        assert_eq!(flow.targets(), vec!["dialog", "spinner"]);
+        assert_eq!(flow.steps[2].summary(), "pause 500ms");
+    }
+
+    #[test]
+    fn bounds_enforcement_defaults_on() {
+        assert!(Flow::parse(MINIMAL).expect("valid").settings.bounds);
     }
 
     #[test]

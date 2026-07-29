@@ -78,6 +78,50 @@ pub fn preflight(
     )
 }
 
+/// Bounds enforcement, honoring the flow's setting.
+fn bounds_gate(
+    flow: &Flow,
+    planned: &pixelactions_core::plan::PlannedStep,
+    corrections: &Corrections,
+    monitors: &[MonitorRecord],
+) -> Result<()> {
+    if !flow.settings.bounds {
+        return Ok(());
+    }
+    check_bounds(planned, corrections, monitors)
+}
+
+/// Poll until a region is present (`want_present`) or absent, or the
+/// flow's timeout expires.
+///
+/// This is the honest alternative to a sleep: each poll is a real screen
+/// capture through pixelcoords, so waiting costs something and returns
+/// the truth rather than a guess about how long an app needs.
+fn poll_until(
+    flow: &Flow,
+    session: &Path,
+    target: &str,
+    want_present: bool,
+    verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
+) -> Result<StepOutcome> {
+    let deadline = Instant::now() + Duration::from_millis(flow.settings.timeout_ms);
+    let interval = Duration::from_millis(flow.settings.poll_ms.max(1));
+    loop {
+        let report = verifier(session, Some(target))?;
+        if report.is_confirmed(target) == want_present {
+            return Ok(StepOutcome::Verified);
+        }
+        if Instant::now() >= deadline {
+            let wanted = if want_present { "appear" } else { "disappear" };
+            bail!(
+                "timed out after {}ms waiting for {target:?} to {wanted}",
+                flow.settings.timeout_ms
+            );
+        }
+        std::thread::sleep(interval);
+    }
+}
+
 /// Translate each found region's current position into an actable point.
 ///
 /// A region whose new geometry is missing, or whose corrected point falls
@@ -132,14 +176,29 @@ fn describe(result: &verify::FindResult) -> String {
 /// which step failed and why. Errors are outcomes here, not exceptions.
 /// `session` is the resolved session directory — needed to ask
 /// pixelcoords for verification.
+/// Everything a run needs that isn't the injector or the verifier.
+/// Grouped because the alternative is a seven-argument function, and the
+/// house rule forbids silencing that lint inline.
+pub struct Context<'a> {
+    pub flow: &'a Flow,
+    pub plan: &'a Plan,
+    pub session: &'a Path,
+    pub monitors: &'a [MonitorRecord],
+    pub corrections: &'a Corrections,
+}
+
 pub fn execute(
     injector: &mut dyn Injector,
-    flow: &Flow,
-    plan: &Plan,
-    session: &Path,
-    corrections: &Corrections,
+    context: &Context<'_>,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> RunReport {
+    let Context {
+        flow,
+        plan,
+        session,
+        monitors,
+        corrections,
+    } = *context;
     let started = Instant::now();
     let settle = Duration::from_millis(flow.settings.settle_ms);
     let mut steps: Vec<StepReport> = Vec::with_capacity(plan.steps.len());
@@ -165,7 +224,8 @@ pub fn execute(
         // Act on where the regions are now, not where they were when the
         // session was captured.
         let points = corrected_points(planned, corrections);
-        let outcome = perform(injector, &planned.step, planned, &points, settle)
+        let outcome = bounds_gate(flow, planned, corrections, monitors)
+            .and_then(|()| perform(injector, &planned.step, planned, &points, settle))
             .and_then(|()| confirm(flow, &planned.step, session, verifier));
         let elapsed = step_started.elapsed().as_millis() as u64;
 
@@ -237,6 +297,49 @@ fn corrected_points(
         .collect()
 }
 
+/// Refuse a step whose corrected point has wandered outside the region a
+/// human actually marked.
+///
+/// Relocation moves a point to wherever the crop matched. If that is no
+/// longer inside the marked region, the match found something else —
+/// and clicking it would be acting on an unknown thing.
+fn check_bounds(
+    planned: &pixelactions_core::plan::PlannedStep,
+    corrections: &Corrections,
+    monitors: &[MonitorRecord],
+) -> Result<()> {
+    for (index, bounds) in planned.bounds.iter().enumerate() {
+        let Some(corrected) = corrections.get(&bounds.label) else {
+            continue; // not relocated: the planner already proved it fits
+        };
+        let Some(monitor) = monitors.iter().find(|m| m.index == corrected.monitor) else {
+            continue;
+        };
+        // Corrections carry converted coordinates; bounds are global
+        // physical, so undo the scale before comparing.
+        let global_x = (corrected.x * scale_for(corrected.space, monitor.scale)).round() as i32;
+        let global_y = (corrected.y * scale_for(corrected.space, monitor.scale)).round() as i32;
+        if !pixelactions_core::plan::within_bounds(bounds, global_x, global_y) {
+            bail!(
+                "refusing step {}: {:?} relocated to ({global_x}, {global_y}), outside the \
+                 region you marked — the match found something else",
+                planned.index + 1,
+                bounds.label
+            );
+        }
+        let _ = index;
+    }
+    Ok(())
+}
+
+/// The multiplier that returns a converted coordinate to physical pixels.
+fn scale_for(space: Space, monitor_scale: f64) -> f64 {
+    match space {
+        Space::Logical => monitor_scale,
+        _ => 1.0,
+    }
+}
+
 /// Perform one step's input.
 fn perform(
     injector: &mut dyn Injector,
@@ -278,9 +381,10 @@ fn perform(
         }
         Step::Type { text } => injector.text(text)?,
         Step::Key { chord } => injector.chord(chord)?,
-        // Verification-only steps inject nothing; the confirm phase does
-        // the work.
-        Step::Verify { .. } => {}
+        Step::Pause { ms } => std::thread::sleep(Duration::from_millis(*ms)),
+        // Verification and waiting steps inject nothing; the confirm
+        // phase does their work.
+        Step::Verify { .. } | Step::WaitFor { .. } | Step::WaitGone { .. } => {}
     }
     std::thread::sleep(settle);
     Ok(())
@@ -295,6 +399,14 @@ fn confirm(
     session: &Path,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
+    // Waiting steps poll for a condition rather than checking once.
+    if let Step::WaitFor { target } = step {
+        return poll_until(flow, session, target, true, verifier);
+    }
+    if let Step::WaitGone { target } = step {
+        return poll_until(flow, session, target, false, verifier);
+    }
+
     // A `verify` step always checks, whatever the run-wide setting — it
     // exists for no other reason.
     let explicit = matches!(step, Step::Verify { .. });
@@ -362,6 +474,7 @@ mod tests {
             summary: step.summary(),
             step,
             points,
+            bounds: Vec::new(),
         }
     }
 
@@ -410,10 +523,13 @@ mod tests {
         };
         let report = execute(
             &mut injector,
-            &flow_with(Verify::None),
-            &plan,
-            Path::new("/tmp/session"),
-            &Corrections::new(),
+            &Context {
+                flow: &flow_with(Verify::None),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
             &mut always_found(),
         );
         assert_eq!(injector.events, vec!["move 100,200", "click"]);
@@ -435,10 +551,13 @@ mod tests {
         };
         execute(
             &mut injector,
-            &flow_with(Verify::None),
-            &plan,
-            Path::new("/tmp/session"),
-            &Corrections::new(),
+            &Context {
+                flow: &flow_with(Verify::None),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
             &mut always_found(),
         );
         assert_eq!(injector.events.first().expect("moved"), "move 0,0");
@@ -476,10 +595,13 @@ mod tests {
         };
         let report = execute(
             &mut injector,
-            &flow_with(Verify::Each),
-            &plan,
-            Path::new("/tmp/session"),
-            &Corrections::new(),
+            &Context {
+                flow: &flow_with(Verify::Each),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
             &mut never_found(),
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
@@ -503,20 +625,26 @@ mod tests {
         };
         let unverified = execute(
             &mut injector,
-            &flow_with(Verify::None),
-            &plan,
-            Path::new("/tmp/session"),
-            &Corrections::new(),
+            &Context {
+                flow: &flow_with(Verify::None),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
             &mut always_found(),
         );
         assert_eq!(unverified.steps[0].outcome, StepOutcome::Executed);
 
         let verified = execute(
             &mut Recording::default(),
-            &flow_with(Verify::Each),
-            &plan,
-            Path::new("/tmp/session"),
-            &Corrections::new(),
+            &Context {
+                flow: &flow_with(Verify::Each),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
             &mut always_found(),
         );
         assert_eq!(verified.steps[0].outcome, StepOutcome::Verified);
@@ -535,10 +663,13 @@ mod tests {
         };
         let report = execute(
             &mut Recording::default(),
-            &flow_with(Verify::None),
-            &plan,
-            Path::new("/tmp/session"),
-            &Corrections::new(),
+            &Context {
+                flow: &flow_with(Verify::None),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
             &mut never_found(),
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
@@ -604,10 +735,13 @@ mod tests {
         };
         let report = execute(
             &mut injector,
-            &flow_with(Verify::None),
-            &plan,
-            Path::new("/tmp/session"),
-            &corrections,
+            &Context {
+                flow: &flow_with(Verify::None),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &corrections,
+            },
             &mut moved_up(),
         );
         assert_eq!(injector.events, vec!["move 430,170", "click"]);
@@ -652,6 +786,186 @@ mod tests {
         assert!(corrections.is_empty());
     }
 
+    /// A verifier that reports absent the first N times, then present.
+    fn appears_after(
+        polls: usize,
+    ) -> impl FnMut(&Path, Option<&str>) -> Result<verify::FindReport> {
+        let mut seen = 0usize;
+        move |_, label| {
+            seen += 1;
+            let found = seen > polls;
+            Ok(serde_json::from_str(&format!(
+                r#"{{"all_relocated":{found},"results":[{{"label":"{}","found":{found}}}]}}"#,
+                label.unwrap_or("x")
+            ))
+            .expect("fixture"))
+        }
+    }
+
+    fn waiting_flow(step: &str, timeout_ms: u64) -> Flow {
+        let mut flow = Flow::parse(&format!("session = \"s\"\n\n{step}")).expect("valid");
+        flow.settings.settle_ms = 0;
+        flow.settings.poll_ms = 1;
+        flow.settings.timeout_ms = timeout_ms;
+        flow
+    }
+
+    #[test]
+    fn wait_for_polls_until_the_region_appears() {
+        let flow = waiting_flow(
+            "[[step]]\naction = \"wait_for\"\ntarget = \"dialog\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::WaitFor {
+                    target: "dialog".into(),
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut appears_after(3),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Verified);
+    }
+
+    #[test]
+    fn wait_for_times_out_honestly_rather_than_hanging() {
+        let flow = waiting_flow("[[step]]\naction = \"wait_for\"\ntarget = \"dialog\"\n", 5);
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::WaitFor {
+                    target: "dialog".into(),
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut never_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+        let detail = report.steps[0].detail.clone().expect("explained");
+        assert!(detail.contains("timed out"), "detail: {detail}");
+        assert!(
+            detail.contains("appear"),
+            "says what it waited for: {detail}"
+        );
+    }
+
+    #[test]
+    fn wait_gone_succeeds_when_the_region_is_absent() {
+        let flow = waiting_flow(
+            "[[step]]\naction = \"wait_gone\"\ntarget = \"spinner\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::WaitGone {
+                    target: "spinner".into(),
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut never_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Verified);
+    }
+
+    #[test]
+    fn a_correction_outside_its_own_region_is_refused() {
+        // The guardrail: relocation found a match, but it landed outside
+        // the region a human marked — so it matched something else.
+        use pixelcoords_core::geometry::{Rect, Shape};
+        let flow = flow_with(Verify::None);
+        let mut plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Click {
+                    target: "submit".into(),
+                },
+                vec![point(10.0, 10.0)],
+            )],
+        };
+        plan.steps[0].bounds = vec![pixelactions_core::plan::Bounds {
+            label: "submit".into(),
+            shape: Shape::Rect(Rect::new(800, 400, 100, 80)),
+            monitor: 0,
+        }];
+        let mut corrections = Corrections::new();
+        // Logical (10, 10) on a 2x monitor is global physical (20, 20) —
+        // nowhere near the marked rect.
+        corrections.insert("submit".into(), point(10.0, 10.0));
+
+        let mut injector = Recording::default();
+        let report = execute(
+            &mut injector,
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &corrections,
+            },
+            &mut always_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+        assert!(injector.events.is_empty(), "nothing was injected");
+        let detail = report.steps[0].detail.clone().expect("explained");
+        assert!(detail.contains("outside the region"), "detail: {detail}");
+    }
+
+    #[test]
+    fn a_pause_step_injects_nothing_and_succeeds() {
+        let mut flow = flow_with(Verify::Each);
+        flow.settings.settle_ms = 0;
+        let plan = Plan {
+            steps: vec![planned(0, Step::Pause { ms: 1 }, Vec::new())],
+        };
+        let mut injector = Recording::default();
+        let report = execute(
+            &mut injector,
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut never_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Executed);
+        assert!(injector.events.is_empty());
+    }
+
     #[test]
     fn keyboard_steps_report_executed_never_verified() {
         let plan = Plan {
@@ -665,10 +979,13 @@ mod tests {
         };
         let report = execute(
             &mut Recording::default(),
-            &flow_with(Verify::Each),
-            &plan,
-            Path::new("/tmp/session"),
-            &Corrections::new(),
+            &Context {
+                flow: &flow_with(Verify::Each),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
             &mut always_found(),
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Executed);
