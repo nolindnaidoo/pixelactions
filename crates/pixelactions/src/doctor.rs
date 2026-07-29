@@ -9,8 +9,69 @@ use serde::Serialize;
 
 use crate::session::SUPPORTED_SCHEMA;
 
-/// The minimum pixelcoords the loop is built against. Checked, not assumed.
-pub const MIN_PIXELCOORDS: &str = "0.1.1";
+/// The minimum pixelcoords this build can trust, and the reason it is not
+/// simply "whatever is installed".
+///
+/// Below 0.1.2, captures composited the mouse pointer into the image. This
+/// tool parks the pointer on whatever it just clicked, so the pointer
+/// lands inside the very region the next check re-locates — costing enough
+/// match score on a low-detail region to push a perfect match under the
+/// floor. The result is a loop that fails intermittently and blames the
+/// screen. Refusing an old pixelcoords is cheaper than debugging that.
+pub const MIN_PIXELCOORDS: &str = "0.1.2";
+
+/// Split `0.1.2` into comparable numbers. Anything that is not three
+/// dotted integers is unreadable rather than assumed good.
+fn parts(version: &str) -> Option<(u32, u32, u32)> {
+    let mut fields = version.trim().split('.');
+    let major = fields.next()?.parse().ok()?;
+    let minor = fields.next()?.parse().ok()?;
+    // Tolerate a pre-release suffix: 0.1.2-rc1 is 0.1.2 for this purpose.
+    let patch = fields.next()?.split(['-', '+']).next()?.parse().ok()?;
+    if fields.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// Whether an installed version is new enough.
+pub fn meets_minimum(found: &str) -> bool {
+    let (Some(found), Some(needed)) = (parts(found), parts(MIN_PIXELCOORDS)) else {
+        return false;
+    };
+    found >= needed
+}
+
+/// Refuse before acting when the pixelcoords on PATH cannot be trusted.
+///
+/// Checked once per run rather than per call: this shells out to another
+/// binary, and the answer cannot change mid-run.
+pub fn require_supported_pixelcoords() -> Result<(), String> {
+    let status = pixelcoords_status();
+    if !status.found {
+        return Err(
+            "pixelcoords is not on PATH — it is what relocates and verifies regions. \
+             Install it with `cargo install pixelcoords`"
+                .to_string(),
+        );
+    }
+    let Some(version) = status.version else {
+        return Err(
+            "could not read `pixelcoords --version`, so its version cannot be trusted. \
+             Reinstall with `cargo install pixelcoords`"
+                .to_string(),
+        );
+    };
+    if !meets_minimum(&version) {
+        return Err(format!(
+            "pixelcoords {version} is too old — this build needs {MIN_PIXELCOORDS} or newer. \
+             Older captures composite the mouse pointer into the image, which makes \
+             relocation unreliable in a way that looks like flakiness. \
+             Upgrade with `cargo install pixelcoords`"
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Debug, Serialize)]
 struct Report {
@@ -112,7 +173,12 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
     );
     match (&report.pixelcoords.found, &report.pixelcoords.version) {
         (true, Some(version)) => {
-            println!("pixelcoords:     {version} (minimum {MIN_PIXELCOORDS})");
+            let verdict = if meets_minimum(version) {
+                "ok"
+            } else {
+                "TOO OLD"
+            };
+            println!("pixelcoords:     {version} (minimum {MIN_PIXELCOORDS}) — {verdict}");
         }
         (true, None) => println!("pixelcoords:     found, version unreadable"),
         (false, _) => println!("pixelcoords:     not on PATH — needed to relocate and verify"),
@@ -210,5 +276,39 @@ fn run_probe(requested: bool) -> Probe {
         attempted: requested,
         moved: false,
         detail: requested.then(|| "input synthesis is macOS-only in this build".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_declared_minimum_is_itself_readable() {
+        assert!(parts(MIN_PIXELCOORDS).is_some(), "{MIN_PIXELCOORDS}");
+    }
+
+    #[test]
+    fn newer_and_equal_versions_are_accepted() {
+        assert!(meets_minimum(MIN_PIXELCOORDS));
+        assert!(meets_minimum("0.1.3"));
+        assert!(meets_minimum("0.2.0"));
+        assert!(meets_minimum("1.0.0"));
+        // A pre-release of the minimum still carries the fix.
+        assert!(meets_minimum("0.1.2-rc1"));
+    }
+
+    #[test]
+    fn older_versions_are_refused() {
+        assert!(!meets_minimum("0.1.1"));
+        assert!(!meets_minimum("0.1.0"));
+        assert!(!meets_minimum("0.0.9"));
+    }
+
+    #[test]
+    fn an_unreadable_version_is_refused_rather_than_assumed_good() {
+        for bad in ["", "0.1", "0.1.2.3", "banana", "v0.1.2", "0.x.2"] {
+            assert!(!meets_minimum(bad), "should refuse {bad:?}");
+        }
     }
 }

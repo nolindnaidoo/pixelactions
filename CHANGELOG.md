@@ -8,6 +8,10 @@ CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 
 ## Unreleased
 
+Requires **pixelcoords 0.1.2 or newer**, enforced before any run: older
+captures composite the mouse pointer into the image, which makes
+relocation unreliable in a way that presents as flakiness.
+
 Nothing is published yet. The loop works end to end on macOS — resolve a
 label to its verified point, re-locate it against a fresh capture, act,
 and confirm — driven three ways: chained argv, flow files, and the

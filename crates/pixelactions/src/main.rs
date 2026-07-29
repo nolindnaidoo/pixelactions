@@ -81,6 +81,12 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
         );
         return Ok(EXIT_REFUSED);
     }
+    // Refuse before acting, not after a confusing failure: relocation and
+    // verification both run through the pixelcoords binary.
+    if let Err(reason) = doctor::require_supported_pixelcoords() {
+        eprintln!("pixelactions: {reason}");
+        return Ok(EXIT_REFUSED);
+    }
     let (flow, session_path, session) = load_flow(source)?;
     let space = flow.settings.space;
     let resolved = plan(&flow, &session, space)?;
