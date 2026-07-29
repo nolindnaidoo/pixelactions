@@ -1,0 +1,59 @@
+name: Bug report
+description: Something did the wrong thing, clicked the wrong place, or refused to run.
+labels: ["bug"]
+body:
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      description: On Linux, include the session type and desktop environment.
+      placeholder: "macOS 15.5 · Windows 11 24H2 · Ubuntu 24.04 (Wayland, GNOME 46)"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pixelactions version
+      description: The output of `pixelactions --version`.
+      placeholder: pixelactions 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: >-
+        Paste the full output of `pixelactions doctor`. It reports the
+        platform, the coordinate space, input permission, and the
+        pixelcoords binary this build will call.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: Plan output
+      description: >-
+        `pixelactions plan` for the same arguments. It resolves every
+        coordinate without touching anything, which separates "the wrong
+        place was computed" from "the right place was computed and the
+        input did not land".
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >-
+        Optional but often decisive: `pixelcoords find --session DIR` at
+        the moment of the failure (most surprises are the screen no
+        longer matching the session), the flow file, or a `--json` run
+        report.

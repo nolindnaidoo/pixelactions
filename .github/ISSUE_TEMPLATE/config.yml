@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Command reference and exit codes
+    url: https://github.com/nolindnaidoo/pixelactions/blob/main/docs/CLI.md
+    about: Commands, chained verbs, the kill switch, and what each exit code means — check here first.
+  - name: The line protocol
+    url: https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md
+    about: Driving pixelactions from your own program, with a working client.

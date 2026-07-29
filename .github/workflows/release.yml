@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # macOS only, deliberately. The binary compiles everywhere — `plan`
+    # and `doctor` work on any platform — but input synthesis is
+    # implemented for macOS alone right now, and shipping a Windows or
+    # Linux archive would imply a support this build does not have.
+    # Add targets here when injection actually works on them.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p pixelactions
+      - name: Package
+        shell: bash
+        run: |
+          name="pixelactions-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$name"
+          cp README.md LICENSE CHANGELOG.md SKILL.md "$name/"
+          cp -r examples "$name/"
+          cp "target/${{ matrix.target }}/release/pixelactions" "$name/"
+          tar czf "$name.tar.gz" "$name"
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          draft: true
+          files: pixelactions-*.tar.gz

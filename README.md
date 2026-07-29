@@ -115,13 +115,35 @@ instead of the two we could afford to embed.
 - **Exit codes are the API**: 0 done, 1 a step failed, 2 malformed
   question, 3 refused.
 
+## Non-goals
+
+Settled, so the same debates don't reopen. The full list with reasoning
+is in [design/05-NON-GOALS.md](design/05-NON-GOALS.md).
+
+- **No embedded interpreter** — not Python, not JS, not Lua. Your bot is
+  written in your language and drives this over a pipe, which is why it
+  works with every language instead of the two we could afford to embed.
+- **No network surface** — no socket, no HTTP, no daemon. This process
+  holds the permission to click and type; a listener would lend that to
+  anything able to reach it.
+- **No scripting language in flow files** — no loops, conditionals, or
+  variables. That's the line between a tool and an RPA suite. Anything
+  needing branching should be a real program calling the protocol.
+- **No recorder.** "Record my clicks and replay them" produces
+  unreviewable artifacts that break on the first UI change. Marks come
+  from pixelcoords, with a human choosing what matters.
+- **Not an accessibility-tree tool, and not a browser automation tool.**
+  Those exist and are good. This is for where trees don't reach.
+
 ## Documentation
 
 - [docs/FLOW.md](docs/FLOW.md) — the flow file: every step and setting
 - [docs/CLI.md](docs/CLI.md) — commands, chained verbs, exit codes
 - [docs/PROTOCOL.md](docs/PROTOCOL.md) — the line protocol, with a client
 - [docs/OUTPUT.md](docs/OUTPUT.md) — run, plan, and doctor reports
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — builds, CI gates, releases
 - [SKILL.md](SKILL.md) — for coding agents driving this tool
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ## Design
 

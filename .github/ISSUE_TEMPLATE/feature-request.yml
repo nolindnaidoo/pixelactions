@@ -1,0 +1,26 @@
+name: Feature request
+description: Something pixelactions should do and doesn't.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Check
+        [design/05-NON-GOALS.md](https://github.com/nolindnaidoo/pixelactions/blob/main/design/05-NON-GOALS.md)
+        first — an embedded interpreter, a network surface, a scripting
+        language, and a recorder are settled and won't be reopened.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What you're trying to automate and where the tool stops short.
+        The problem matters more than the proposed feature — a different
+        fix may fall out of it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Optional — how you imagine it working.
