@@ -9,6 +9,7 @@ rust-version = "1.88"
 license = "MIT"
 readme = "README.md"
 authors = ["Nolin D Naidoo"]
+homepage = "https://pixelactions.dev"
 repository = "https://github.com/nolindnaidoo/pixelactions"
 keywords = ["automation", "coordinates", "input", "desktop", "testing"]
 categories = ["command-line-utilities", "development-tools"]
