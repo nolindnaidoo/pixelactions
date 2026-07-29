@@ -59,6 +59,12 @@ kill-switch listener thread, watchdog timeout, audit log. This is what
 makes it trustworthy for unattended runs — the difference between a
 convenience and something you'd let an agent drive.
 
+## 0.3.5 — programmability (see 10-PROGRAMMABILITY-SPEC.md)
+
+Argv chaining, then `serve` (NDJSON over stdio), then a `SKILL.md` for
+agents. Deliberately before the MCP question, because the CLI surface
+reaches strictly more agents than a stdio MCP server does.
+
 ## 0.4.0 — the agent surface
 
 `pixelactions mcp`: `find` / `act` / `assert` as MCP tools. The research

@@ -3,6 +3,14 @@
 Written early on purpose. pixelcoords' non-goals section ended every
 "why don't you add…" debate before it started; this does the same.
 
+- **An embedded interpreter.** Not Python, not JS, not Lua. Your bot is
+  written in your language and drives this binary over a line protocol —
+  which is why it works with every language instead of the two we could
+  afford to embed. See `10-PROGRAMMABILITY-SPEC.md`.
+- **A network surface.** No socket, no HTTP, no daemon. This process
+  holds the permission to click and type; a listener would lend that
+  permission to anything that can reach it. Communication is stdio with
+  the caller that launched us, or nothing.
 - **A scripting language.** No loops, no conditionals, no variables, no
   expression evaluator. A flow is a list of steps. Anything needing
   branching should be a real program calling pixelactions step by step.

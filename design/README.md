@@ -14,6 +14,8 @@ Local design work for the executor half of the pixelcoords loop.
 | [06-RISKS-AND-VERDICT.md](06-RISKS-AND-VERDICT.md) | Is it legitimate, the four risks, and what would make us abandon it |
 | [07-MILESTONES.md](07-MILESTONES.md) | What ships in what order, and what "valuable" means concretely |
 | [08-PIXELCOORDS-CONTRACT.md](08-PIXELCOORDS-CONTRACT.md) | Who owns what across the two tools; overlaps with pixelcoords' roadmap |
+| [09-PROGRAMMABILITY.md](09-PROGRAMMABILITY.md) | Research: how tools become "a CLI and an engine" — transports, bindings, agent surfaces, docs patterns |
+| [10-PROGRAMMABILITY-SPEC.md](10-PROGRAMMABILITY-SPEC.md) | **The decisions**: three surfaces, the line protocol, what we refuse to build |
 
 ## The one-paragraph version
 
