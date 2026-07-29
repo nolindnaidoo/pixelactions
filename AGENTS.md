@@ -122,8 +122,10 @@ need:
   nothing.
 - **Reports distinguish "executed" from "verified".** "Nothing errored"
   is not "it worked", and the wire format says which.
-- Injection got a watchdog and bounds enforcement before it got
-  convenience features; the kill switch is still owed.
+- Injection got its watchdog, bounds enforcement, and kill switch before
+  it got convenience features. The kill switch is a corner check on the
+  cursor before every step; it must stay on the path every surface
+  takes, which is `run::execute`.
 - **`serve` listens on stdio and nowhere else.** No socket, no port, no
   daemon. This process holds the permission to click and type; a
   listener would lend that permission to anything that can reach it.

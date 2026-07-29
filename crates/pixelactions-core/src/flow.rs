@@ -115,6 +115,14 @@ pub struct Settings {
     /// bounds. On by default: the marked region is the guardrail, not
     /// just the target.
     pub bounds: bool,
+    /// Abort the run if the cursor is found in a screen corner before a
+    /// step. The kill switch: grabbing the mouse is what a person does
+    /// when automation goes wrong, and a corner needs no aim. On by
+    /// default — turning it off means nothing but the watchdog can stop
+    /// a run from the outside.
+    pub failsafe: bool,
+    /// How close to a corner counts, in the input space's own units.
+    pub failsafe_margin: f64,
 }
 
 impl Default for Settings {
@@ -127,6 +135,8 @@ impl Default for Settings {
             timeout_ms: 10_000,
             poll_ms: 400,
             bounds: true,
+            failsafe: true,
+            failsafe_margin: 10.0,
         }
     }
 }

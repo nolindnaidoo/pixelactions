@@ -78,7 +78,7 @@ captures and return the instant the condition holds. A `pause:` where a
 | 0 | every step ran, and verified where asked | continue |
 | 1 | a step failed honestly — target missing, verification failed, timeout | read `detail`; the UI is not where you think |
 | 2 | malformed question — bad flow, missing session, unknown label | fix the request; nothing was attempted |
-| 3 | refused — no permission, unsupported platform, screen no longer matches, `--yes` absent | do not retry blindly; the refusal names the fix |
+| 3 | refused — no permission, unsupported platform, screen no longer matches, **kill switch tripped**, point outside its region, `--yes` absent | do not retry; the refusal names the fix |
 
 **3 is not a failure to retry.** It means the tool declined to act, and
 the message says why.
@@ -94,6 +94,8 @@ corrections included), the outcome, timing, and any failure detail.
 - `executed` — it ran; verification was not requested. **This is not
   proof it worked.** The OS accepts an event long before an app reacts.
 - `failed` — it ran and did not work; `detail` says why
+- `refused` — a guard declined before anything was attempted. Never
+  retry this one; read `detail` and stop.
 
 ## Coordinate spaces — the thing to get right
 
@@ -124,4 +126,7 @@ This tool moves a real human's mouse and keyboard on a real machine.
 - Confirm with the user before the first `--yes` run of any session.
 - Do not automate credential entry, payments, or destructive UI actions.
 - A refusal (exit 3) is the tool working correctly. Report it; do not
-  route around it by disabling `relocate` or `bounds`.
+  route around it by disabling `relocate`, `bounds`, or `failsafe`.
+- **The user can stop you by putting the cursor in a screen corner.**
+  A step that comes back `refused` with "kill switch" in its detail was
+  stopped by a person. Do not restart it; ask what they wanted instead.

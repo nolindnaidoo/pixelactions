@@ -107,6 +107,10 @@ instead of the two we could afford to embed.
 - **Waiting is observable, not hopeful.** `wait_for` polls with real
   captures and returns the instant the condition holds. No sleeps, at
   any layer, including the protocol.
+- **Grabbing the mouse stops it.** Slam the cursor into a screen corner
+  and the run halts before the next step — the one control that works
+  while the automation holds your keyboard and the terminal is not
+  focused.
 - **Exit codes are the API**: 0 done, 1 a step failed, 2 malformed
   question, 3 refused.
 

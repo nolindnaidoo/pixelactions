@@ -22,6 +22,12 @@ pub enum StepOutcome {
     Skipped,
     /// Executed but verification failed, or the step itself failed.
     Failed,
+    /// Not executed, on purpose: a guard said no. The kill switch, or a
+    /// point that wandered outside its own marked region. Reported apart
+    /// from `Failed` because "it did not work" and "I declined to try"
+    /// call for different responses — one may be worth retrying, the
+    /// other never is.
+    Refused,
 }
 
 impl StepOutcome {
@@ -35,6 +41,7 @@ impl StepOutcome {
             Self::Executed => "executed",
             Self::Skipped => "skipped",
             Self::Failed => "failed",
+            Self::Refused => "refused",
         }
     }
 }
@@ -66,9 +73,16 @@ pub struct RunReport {
 impl RunReport {
     pub const SCHEMA: u32 = 1;
 
-    /// The exit code this run earns: 0 when every step is verified or
-    /// executed, 1 when any failed.
+    /// The exit code this run earns: 3 when a guard refused, 1 when a
+    /// step failed, 0 otherwise.
+    ///
+    /// A run stops at its first non-success, so at most one of these is
+    /// ever present — the ordering states the precedence rather than
+    /// resolving a real conflict.
     pub fn exit_code(&self) -> i32 {
+        if self.steps.iter().any(|s| s.outcome == StepOutcome::Refused) {
+            return 3;
+        }
         if self.steps.iter().any(|s| s.outcome == StepOutcome::Failed) {
             return 1;
         }
@@ -138,12 +152,21 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_exits_three_not_one() {
+        // "I declined to act" is operationally different from "it did not
+        // work" — a CI job and an agent both need to tell them apart.
+        let run = report(vec![step(0, StepOutcome::Refused)]);
+        assert_eq!(run.exit_code(), 3);
+    }
+
+    #[test]
     fn the_printed_name_is_the_wire_name() {
         for outcome in [
             StepOutcome::Verified,
             StepOutcome::Executed,
             StepOutcome::Skipped,
             StepOutcome::Failed,
+            StepOutcome::Refused,
         ] {
             let json = serde_json::to_string(&outcome).expect("serialize");
             assert_eq!(json, format!("\"{}\"", outcome.name()));

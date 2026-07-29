@@ -7,10 +7,25 @@ Exit codes are the API everywhere:
 | 0 | every step executed, and verified where verification was asked for |
 | 1 | a step failed honestly — target missing, verification failed, timeout |
 | 2 | the question was malformed — bad flow file, missing session, unknown label |
-| 3 | refused — permission missing, unsupported platform, screen no longer matches, `--yes` absent |
+| 3 | refused — permission missing, unsupported platform, screen no longer matches, kill switch tripped, point outside its region, `--yes` absent |
 
 Splitting 3 from 2 matters: "I can't do this here" is operationally
 different from "you asked wrong", and a CI job wants to tell them apart.
+Splitting 3 from 1 matters for the same reason in the other direction: a
+failure may be worth retrying, and a refusal never is.
+
+## The kill switch
+
+Put the cursor in a screen corner and the run stops before its next
+step. This is the one control that works while the automation holds the
+keyboard and your terminal is not focused — no hotkey to configure, no
+extra permission, nothing to remember but the reflex you already have.
+
+It is unambiguous because a flow only ever moves the cursor to a
+*marked region's* click point, and nobody marks a region in the dead
+corner of a screen. Tune or disable it with `failsafe` and
+`failsafe_margin` in [FLOW.md](FLOW.md) — a stopped run reports
+`refused` and exits 3.
 
 ## Where steps come from
 

@@ -16,7 +16,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use pixelactions_core::convert::{ResolvedPoint, Space, to_space};
+use pixelactions_core::convert::{
+    ResolvedPoint, Space, native_space, near_screen_corner, to_space,
+};
 use pixelactions_core::flow::{Flow, Step, Verify};
 use pixelactions_core::plan::Plan;
 use pixelactions_core::report::{RunReport, StepOutcome, StepReport};
@@ -75,6 +77,57 @@ pub fn preflight(
         "the screen no longer matches the session: {}. Re-mark with pixelcoords, or set \
          relocate = false in the flow to act on the saved coordinates anyway",
         unconfirmed.join("; ")
+    )
+}
+
+/// Every reason to decline a step before attempting it. Ordered by how
+/// little work each costs: reading the cursor is instant, the bounds
+/// check is arithmetic.
+fn guards(
+    flow: &Flow,
+    injector: &mut dyn Injector,
+    planned: &pixelactions_core::plan::PlannedStep,
+    corrections: &Corrections,
+    monitors: &[MonitorRecord],
+) -> Result<()> {
+    failsafe_gate(flow, injector, monitors)?;
+    bounds_gate(flow, planned, corrections, monitors)
+}
+
+/// The kill switch, checked before every step.
+///
+/// A person who wants a run to stop grabs the mouse — that reflex is the
+/// only interface that works while the automation holds the keyboard and
+/// the terminal is not focused. Slamming the cursor into a screen corner
+/// aborts before the next step is performed.
+///
+/// A cursor that cannot be read fails the step rather than being waved
+/// through: a safety check that silently stops evaluating is worse than
+/// one that was never claimed. Turning `failsafe` off is the supported
+/// way to opt out.
+fn failsafe_gate(
+    flow: &Flow,
+    injector: &mut dyn Injector,
+    monitors: &[MonitorRecord],
+) -> Result<()> {
+    if !flow.settings.failsafe {
+        return Ok(());
+    }
+    let (x, y) = injector.cursor().map_err(|error| {
+        anyhow::anyhow!("failsafe is on but the cursor position could not be read: {error}")
+    })?;
+    if !near_screen_corner(
+        monitors,
+        resolve_space(flow.settings.space),
+        x,
+        y,
+        flow.settings.failsafe_margin,
+    ) {
+        return Ok(());
+    }
+    bail!(
+        "kill switch: the cursor is in a screen corner ({x:.0}, {y:.0}), so the run stopped \
+         before this step. Move it away and run again, or set failsafe = false"
     )
 }
 
@@ -224,8 +277,22 @@ pub fn execute(
         // Act on where the regions are now, not where they were when the
         // session was captured.
         let points = corrected_points(planned, corrections);
-        let outcome = bounds_gate(flow, planned, corrections, monitors)
-            .and_then(|()| perform(injector, &planned.step, planned, &points, settle))
+
+        // Guards run first and are reported apart from failures: nothing
+        // was attempted, and the run earns exit 3 rather than 1.
+        if let Err(refusal) = guards(flow, injector, planned, corrections, monitors) {
+            steps.push(record_with(
+                planned,
+                StepOutcome::Refused,
+                Some(format!("{refusal:#}")),
+                step_started.elapsed().as_millis() as u64,
+                points,
+            ));
+            failed = true;
+            continue;
+        }
+
+        let outcome = perform(injector, &planned.step, planned, &points, settle)
             .and_then(|()| confirm(flow, &planned.step, session, verifier));
         let elapsed = step_started.elapsed().as_millis() as u64;
 
@@ -333,6 +400,16 @@ fn check_bounds(
 }
 
 /// The multiplier that returns a converted coordinate to physical pixels.
+/// `Auto` resolved to what this platform's input API actually speaks —
+/// the space the cursor is read in, and the space corners must be
+/// compared in.
+fn resolve_space(space: Space) -> Space {
+    match space {
+        Space::Auto => native_space(),
+        other => other,
+    }
+}
+
 fn scale_for(space: Space, monitor_scale: f64) -> f64 {
     match space {
         Space::Logical => monitor_scale,
@@ -534,6 +611,145 @@ mod tests {
         );
         assert_eq!(injector.events, vec!["move 100,200", "click"]);
         assert_eq!(report.exit_code(), 0);
+    }
+
+    #[test]
+    fn a_cursor_in_a_corner_stops_the_run_before_the_step() {
+        // The single test monitor is 3024x1964 at scale 2, so its
+        // bottom-right corner is (1511.5, 981.5) in logical points —
+        // where a person slamming the mouse would leave it.
+        let mut injector = Recording {
+            cursor: (1511.0, 981.0),
+            ..Default::default()
+        };
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Click {
+                    target: "submit".into(),
+                },
+                vec![point(100.0, 200.0)],
+            )],
+        };
+        let mut flow = flow_with(Verify::None);
+        flow.settings.space = Space::Logical;
+        let report = execute(
+            &mut injector,
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut always_found(),
+        );
+        assert_eq!(
+            injector.events,
+            Vec::<String>::new(),
+            "nothing may be injected once the kill switch trips"
+        );
+        assert_eq!(
+            report.exit_code(),
+            3,
+            "a person stopping the run is a refusal, not a failure"
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Refused);
+        let detail = report.steps[0].detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("kill switch"), "says why: {detail}");
+    }
+
+    #[test]
+    fn the_kill_switch_can_be_turned_off_deliberately() {
+        let mut injector = Recording {
+            cursor: (1511.0, 981.0),
+            ..Default::default()
+        };
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Click {
+                    target: "submit".into(),
+                },
+                vec![point(100.0, 200.0)],
+            )],
+        };
+        let mut flow = flow_with(Verify::None);
+        flow.settings.space = Space::Logical;
+        flow.settings.failsafe = false;
+        let report = execute(
+            &mut injector,
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut always_found(),
+        );
+        assert_eq!(injector.events, vec!["move 100,200", "click"]);
+        assert_eq!(report.exit_code(), 0);
+    }
+
+    #[test]
+    fn an_unreadable_cursor_refuses_the_step_rather_than_waving_it_through() {
+        /// An injector whose cursor cannot be read — the shape a missing
+        /// permission takes.
+        struct Blind;
+        impl Injector for Blind {
+            fn move_to(&mut self, _x: f64, _y: f64) -> Result<()> {
+                Ok(())
+            }
+            fn click(&mut self, _button: Button) -> Result<()> {
+                Ok(())
+            }
+            fn double_click(&mut self, _button: Button) -> Result<()> {
+                Ok(())
+            }
+            fn press(&mut self, _button: Button) -> Result<()> {
+                Ok(())
+            }
+            fn release(&mut self, _button: Button) -> Result<()> {
+                Ok(())
+            }
+            fn text(&mut self, _text: &str) -> Result<()> {
+                Ok(())
+            }
+            fn chord(&mut self, _chord: &str) -> Result<()> {
+                Ok(())
+            }
+            fn cursor(&mut self) -> Result<(f64, f64)> {
+                bail!("no cursor here")
+            }
+            fn probe(&mut self) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Click {
+                    target: "submit".into(),
+                },
+                vec![point(100.0, 200.0)],
+            )],
+        };
+        let report = execute(
+            &mut Blind,
+            &Context {
+                flow: &flow_with(Verify::None),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut always_found(),
+        );
+        assert_eq!(report.exit_code(), 3);
+        let detail = report.steps[0].detail.as_deref().unwrap_or_default();
+        assert!(detail.contains("failsafe"), "names the setting: {detail}");
     }
 
     #[test]
@@ -937,7 +1153,8 @@ mod tests {
             },
             &mut always_found(),
         );
-        assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+        assert_eq!(report.steps[0].outcome, StepOutcome::Refused);
+        assert_eq!(report.exit_code(), 3, "declining to act is not a failure");
         assert!(injector.events.is_empty(), "nothing was injected");
         let detail = report.steps[0].detail.clone().expect("explained");
         assert!(detail.contains("outside the region"), "detail: {detail}");

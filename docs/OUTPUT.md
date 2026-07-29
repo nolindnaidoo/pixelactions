@@ -33,11 +33,22 @@
     not "it worked"**, and this is where that distinction lives.
   - `skipped` — an earlier step failed
   - `failed` — the step or its verification failed; `detail` says why
+  - `refused` — a guard declined *before* anything was attempted: the
+    kill switch (a cursor in a screen corner) or a point outside its own
+    marked region. Distinct from `failed` because a failure may be worth
+    retrying and a refusal never is. A run containing one exits 3.
 
 ## Plan report (`plan --json`)
 
 The same shape minus outcomes, with `"executed": false`. Useful for
 diffing what a flow *would* do after a session is re-captured.
+
+## Protocol messages (`serve`)
+
+The line protocol has its own message shapes — one JSON object per line,
+in and out — documented in [PROTOCOL.md](PROTOCOL.md). They reuse this
+file's vocabulary: a `done` response carries the same `outcome` values
+and the same resolved `points` as a run report's step.
 
 ## Doctor report (`doctor --json`)
 

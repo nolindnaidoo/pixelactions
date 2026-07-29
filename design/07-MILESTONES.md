@@ -31,12 +31,10 @@ call an executor actually wants.
 
 **Landed here rather than later**, because each turned out to be small
 once the run loop existed: `wait_for` / `wait_gone` polling, bounds
-enforcement, the watchdog, and all three drive surfaces (chained argv,
-flow files, `serve`).
+enforcement, the watchdog, the corner kill switch, and all three drive
+surfaces (chained argv, flow files, `serve`).
 
-**Deliberately out:** Windows, Linux, MCP, `scroll`, the kill-switch
-listener thread (dry-run, bounds, and the watchdog carry the safety load
-at this size).
+**Deliberately out:** Windows, Linux, MCP, `scroll`.
 
 **Why macOS first:** it's the dev machine, it has the nastiest
 coordinate conversion (Retina/scaled/multi-display), and getting it
@@ -59,9 +57,11 @@ platforms, and CI proves it on a headed runner where possible.
 
 ## 0.3.0 — safety and orchestration
 
-What remains here after the early landings above: the kill-switch
-listener thread and an audit log. Observable polling, bounds
-enforcement, and the watchdog shipped in 0.1.0. This is what makes it
+What remains here after the early landings above: an audit log.
+Observable polling, bounds enforcement, the watchdog, and the kill
+switch shipped in 0.1.0. The kill switch landed as a corner check on
+the cursor rather than a listener thread — no background thread, no
+extra permission, no global hotkey to conflict with. This is what makes it
 trustworthy for unattended runs — the difference between a convenience
 and something you'd let an agent drive.
 

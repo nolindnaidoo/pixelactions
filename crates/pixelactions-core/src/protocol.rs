@@ -389,6 +389,15 @@ mod tests {
     }
 
     #[test]
+    fn a_handshake_without_a_version_says_which_one_we_speak() {
+        let error = parse_request(r#"{"do":"hello"}"#).expect_err("no version");
+        assert!(
+            error.contains(&PROTOCOL_VERSION.to_string()),
+            "names the version to send: {error}"
+        );
+    }
+
+    #[test]
     fn a_typo_in_settings_is_an_error_not_a_silent_default() {
         // Our own config is parsed strictly — see AGENTS.md.
         let error = parse_request(r#"{"do":"hello","version":1,"settings":{"timeout":1}}"#)

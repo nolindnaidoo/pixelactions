@@ -37,6 +37,13 @@ pub trait Injector {
     /// modifiers released in reverse.
     fn chord(&mut self, chord: &str) -> Result<()>;
 
+    /// Where the cursor is now, in the platform's own input space.
+    ///
+    /// Read rather than remembered: the point of asking is to notice a
+    /// *human* moving the mouse, which is exactly what a remembered
+    /// position cannot see.
+    fn cursor(&mut self) -> Result<(f64, f64)>;
+
     /// Prove injection actually works, harmlessly: read the cursor, move
     /// it one pixel, put it back, and confirm the OS agreed.
     ///
@@ -52,9 +59,25 @@ pub trait Injector {
 /// it is why the run loop's ordering, settling, verification, and abort
 /// behavior are testable without a screen.
 #[cfg(test)]
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Recording {
     pub events: Vec<String>,
+    /// Where this double reports the cursor to be. Settable so the run
+    /// loop's kill-switch behavior is testable without a screen.
+    pub cursor: (f64, f64),
+}
+
+#[cfg(test)]
+impl Default for Recording {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            // Deliberately not (0, 0) — that is a screen corner, and it
+            // would trip the kill switch in every test that never meant
+            // to exercise it.
+            cursor: (400.0, 300.0),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -86,6 +109,9 @@ impl Injector for Recording {
     fn chord(&mut self, chord: &str) -> Result<()> {
         self.events.push(format!("chord {chord}"));
         Ok(())
+    }
+    fn cursor(&mut self) -> Result<(f64, f64)> {
+        Ok(self.cursor)
     }
     fn probe(&mut self) -> Result<()> {
         self.events.push("probe".into());
@@ -219,6 +245,14 @@ mod platform {
             self.enigo
                 .text(text)
                 .map_err(|e| anyhow!("typing failed: {e}"))
+        }
+
+        fn cursor(&mut self) -> Result<(f64, f64)> {
+            let (x, y) = self
+                .enigo
+                .location()
+                .map_err(|e| anyhow!("cannot read the cursor position: {e}"))?;
+            Ok((f64::from(x), f64::from(y)))
         }
 
         fn probe(&mut self) -> Result<()> {

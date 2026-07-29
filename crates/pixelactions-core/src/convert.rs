@@ -98,6 +98,56 @@ pub fn to_space(
     })
 }
 
+/// Whether a point already expressed in `space` sits within `margin` of
+/// any monitor's corner.
+///
+/// This is the kill switch. The instinct when automation goes wrong is
+/// to grab the mouse, and a corner is the one place a human can reach
+/// without aiming — pyautogui proved the pattern, and it costs no
+/// listener thread, no extra permission, and no global hotkey.
+///
+/// It is unambiguous here for a reason specific to this tool: a flow
+/// only ever moves the cursor to a *marked region's* click point, and no
+/// human marks a region in the dead corner of a screen. A cursor found
+/// there is evidence of a person, not of us.
+///
+/// The comparison happens in the input space rather than in physical
+/// pixels because that is the space the cursor is read in — converting
+/// the corners forward avoids needing an inverse conversion that would
+/// have to guess which monitor an unplaced point belongs to.
+pub fn near_screen_corner(
+    monitors: &[MonitorRecord],
+    space: Space,
+    x: f64,
+    y: f64,
+    margin: f64,
+) -> bool {
+    corners(monitors, space)
+        .iter()
+        .any(|corner| (corner.x - x).abs() <= margin && (corner.y - y).abs() <= margin)
+}
+
+/// Every monitor's four corners, converted into `space`.
+///
+/// The far edges use `size - 1`: a monitor 3600 pixels wide has its last
+/// column at 3599, and asking about 3600 would land in the next monitor
+/// or off the desktop entirely.
+pub fn corners(monitors: &[MonitorRecord], space: Space) -> Vec<ResolvedPoint> {
+    let mut corners = Vec::with_capacity(monitors.len() * 4);
+    for monitor in monitors {
+        let left = monitor.origin_px.x;
+        let top = monitor.origin_px.y;
+        let right = left + monitor.size_px.w - 1;
+        let bottom = top + monitor.size_px.h - 1;
+        for (x, y) in [(left, top), (right, top), (left, bottom), (right, bottom)] {
+            if let Some(point) = to_space(monitors, x, y, space) {
+                corners.push(point);
+            }
+        }
+    }
+    corners
+}
+
 #[cfg(test)]
 mod tests {
     use pixelcoords_core::geometry::{Point, Size};
@@ -113,6 +163,84 @@ mod tests {
             size_px: Size::new(size.0, size.1),
             scale,
         }
+    }
+
+    #[test]
+    fn every_monitor_contributes_four_corners() {
+        let monitors = retina_plus_external();
+        assert_eq!(
+            corners(&monitors, Space::Physical).len(),
+            monitors.len() * 4
+        );
+    }
+
+    #[test]
+    fn a_cursor_slammed_into_a_corner_trips_the_kill_switch() {
+        let monitors = vec![monitor(0, (0, 0), (3024, 1964), 2.0)];
+        // Logical space: the physical bottom-right (3023, 1963) is
+        // (1511.5, 981.5) once divided by the scale.
+        assert!(near_screen_corner(
+            &monitors,
+            Space::Logical,
+            1511.5,
+            981.5,
+            10.0
+        ));
+        assert!(near_screen_corner(
+            &monitors,
+            Space::Logical,
+            0.0,
+            0.0,
+            10.0
+        ));
+        // Just inside the margin, from the top-right corner.
+        assert!(near_screen_corner(
+            &monitors,
+            Space::Logical,
+            1503.0,
+            8.0,
+            10.0
+        ));
+    }
+
+    #[test]
+    fn the_middle_of_the_screen_is_not_a_corner() {
+        let monitors = vec![monitor(0, (0, 0), (3024, 1964), 2.0)];
+        assert!(!near_screen_corner(
+            &monitors,
+            Space::Logical,
+            700.0,
+            500.0,
+            10.0
+        ));
+        // An edge is not a corner — only the four extremes count.
+        assert!(!near_screen_corner(
+            &monitors,
+            Space::Logical,
+            700.0,
+            0.0,
+            10.0
+        ));
+    }
+
+    #[test]
+    fn a_corner_of_any_monitor_counts_not_just_the_primary() {
+        let monitors = retina_plus_external();
+        let external = &monitors[1];
+        let corner = to_space(
+            &monitors,
+            external.origin_px.x + external.size_px.w - 1,
+            external.origin_px.y + external.size_px.h - 1,
+            Space::Physical,
+        )
+        .expect("a monitor contains its own corner");
+        assert!(near_screen_corner(
+            &monitors,
+            Space::Physical,
+            corner.x,
+            corner.y,
+            2.0
+        ));
     }
 
     fn retina_plus_external() -> Vec<MonitorRecord> {

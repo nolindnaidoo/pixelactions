@@ -14,6 +14,8 @@ settle_ms = 120      # pause around each injected event
 timeout_ms = 10000   # how long a wait_* step may poll
 poll_ms = 400        # gap between polls; each poll is a screen capture
 bounds = true        # refuse points that leave their marked region
+failsafe = true      # stop if the cursor is slammed into a screen corner
+failsafe_margin = 10 # how close to a corner counts
 
 [[step]]
 action = "click"
@@ -65,6 +67,18 @@ polls with real captures and tells the truth.
 - **`bounds`** (default `true`) — refuse a corrected point that lands
   outside its own marked region. That combination means the crop matched
   something else, and acting on it would click an unknown thing.
+- **`failsafe`** (default `true`) — the kill switch. Before every step,
+  the cursor is read; if it is within `failsafe_margin` of any screen
+  corner, the run stops without injecting that step. Grabbing the mouse
+  is what a person does when automation goes wrong, and a corner takes
+  no aim — it is the one control that works while the automation holds
+  the keyboard and your terminal is not focused.
+
+  It is unambiguous because a flow only ever moves the cursor to a
+  *marked region's* click point, and nobody marks a region in the dead
+  corner of a screen. If the cursor cannot be read at all, the step
+  fails rather than proceeding unchecked — a safety check that silently
+  stops evaluating is worse than one that was never claimed.
 
 ## Paths
 
