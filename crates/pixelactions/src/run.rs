@@ -1146,11 +1146,16 @@ mod tests {
         let plan = Plan {
             steps: vec![step(), step()],
         };
+        // Pinned, because `Auto` resolves to logical on macOS and physical
+        // everywhere else — an assertion on converted coordinates would
+        // pass on one platform and fail on the others.
+        let mut flow = flow_with(Verify::Each);
+        flow.settings.space = Space::Logical;
         let mut injector = Recording::default();
         execute(
             &mut injector,
             &Context {
-                flow: &flow_with(Verify::Each),
+                flow: &flow,
                 plan: &plan,
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
