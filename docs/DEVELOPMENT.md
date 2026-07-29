@@ -86,10 +86,18 @@ clippy's `-D warnings` fails the build. Catch it locally:
 
 ```bash
 rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
-cargo clippy --target x86_64-unknown-linux-gnu --workspace --all-targets -- -D warnings
+for t in x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+  cargo clippy --target "$t" --workspace --all-targets -- -D warnings
+done
 ```
 
 Clippy only checks, so no cross-linker or system libraries are needed.
+
+Tests are the other half, and they cannot be cross-run — a **path
+assertion written as a string literal** passes on Unix and fails on
+Windows, because `PathBuf::join` inserts the platform's own separator.
+Compare against a `PathBuf` built with `join`, not against a spelled-out
+path.
 
 ## Testing
 
