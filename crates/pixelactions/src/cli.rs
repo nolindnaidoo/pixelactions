@@ -6,7 +6,7 @@ const EXAMPLES: &str = "\
 Examples:
   pixelactions plan flow.toml            resolve every step, act on nothing
   pixelactions run flow.toml --yes       perform it, verifying each step
-  pixelactions doctor                    permissions, displays, sister tool
+  pixelactions doctor --probe            prove input permission, harmlessly
 
 A flow references a pixelcoords session by label, never by coordinate.
 Exit codes: 0 done, 1 a step failed honestly, 2 malformed question,
@@ -54,6 +54,11 @@ pub enum Command {
         /// Machine-readable report on stdout instead of the human one
         #[arg(long)]
         json: bool,
+        /// Actually try to move the cursor one pixel and back, to prove
+        /// input permission rather than assume it. Harmless; the cursor
+        /// returns to where it was.
+        #[arg(long)]
+        probe: bool,
     },
 }
 

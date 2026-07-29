@@ -36,6 +36,16 @@ pub trait Injector {
     /// Press a chord such as `cmd+s`: modifiers held, key tapped,
     /// modifiers released in reverse.
     fn chord(&mut self, chord: &str) -> Result<()>;
+
+    /// Prove injection actually works, harmlessly: read the cursor, move
+    /// it one pixel, put it back, and confirm the OS agreed.
+    ///
+    /// This exists because a missing macOS Accessibility grant makes
+    /// event posting a silent no-op — the call "succeeds" and nothing
+    /// moves. Asking the system where the cursor ended up is the only
+    /// honest check, and it is what makes `doctor` able to say "yes"
+    /// rather than "probably".
+    fn probe(&mut self) -> Result<()>;
 }
 
 /// Everything an injector was asked to do, in order. The test double —
@@ -75,6 +85,10 @@ impl Injector for Recording {
     }
     fn chord(&mut self, chord: &str) -> Result<()> {
         self.events.push(format!("chord {chord}"));
+        Ok(())
+    }
+    fn probe(&mut self) -> Result<()> {
+        self.events.push("probe".into());
         Ok(())
     }
 }
@@ -205,6 +219,36 @@ mod platform {
             self.enigo
                 .text(text)
                 .map_err(|e| anyhow!("typing failed: {e}"))
+        }
+
+        fn probe(&mut self) -> Result<()> {
+            let (x, y) = self
+                .enigo
+                .location()
+                .map_err(|e| anyhow!("cannot read the cursor position: {e}"))?;
+            // One pixel, then straight back. Small enough to be invisible,
+            // real enough that the OS either honors it or does not.
+            let target = (x + 1, y);
+            self.enigo
+                .move_mouse(target.0, target.1, Coordinate::Abs)
+                .map_err(|e| anyhow!("cannot move the cursor: {e}"))?;
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            let after = self
+                .enigo
+                .location()
+                .map_err(|e| anyhow!("cannot read the cursor position: {e}"))?;
+            let _ = self.enigo.move_mouse(x, y, Coordinate::Abs);
+
+            if after == (x, y) {
+                return Err(anyhow!(
+                    "the cursor did not move — macOS accepted the event and discarded it, \
+                     which is what happens without the Accessibility permission. Grant it \
+                     under System Settings > Privacy & Security > Accessibility for the \
+                     application running pixelactions (your terminal, if you launched it \
+                     from one), then quit and reopen that application"
+                ));
+            }
+            Ok(())
         }
 
         fn chord(&mut self, chord: &str) -> Result<()> {

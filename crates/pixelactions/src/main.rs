@@ -8,6 +8,8 @@
 mod cli;
 mod doctor;
 mod inject;
+#[cfg(target_os = "macos")]
+mod mac;
 mod run;
 mod session;
 mod verify;
@@ -28,7 +30,7 @@ fn main() {
     let result = match cli.command {
         cli::Command::Plan { flow, json, space } => run_plan(&flow, json, space.map(Into::into)),
         cli::Command::Run { flow, json, yes } => run_flow(&flow, json, yes),
-        cli::Command::Doctor { json } => doctor::run(json),
+        cli::Command::Doctor { json, probe } => doctor::run(json, probe),
     };
     match result {
         Ok(code) => std::process::exit(code),

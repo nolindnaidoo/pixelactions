@@ -36,3 +36,7 @@ cast_precision_loss = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# Cross-platform report fields are Option because some platforms have
+# nothing to report; clippy compiles one target at a time and sees the
+# arm that always returns Some. The shape is deliberate.
+unnecessary_wraps = "allow"
