@@ -207,6 +207,9 @@ impl Server<'_> {
                 // against a screen that may have changed since the last
                 // one, so every acting step checks for itself.
                 checked: false,
+                // Each request answers with its own response; there is no
+                // second channel to narrate into.
+                progress: run::silent(),
             },
             &mut verifier,
         );
