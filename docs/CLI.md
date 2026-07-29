@@ -7,7 +7,7 @@ Exit codes are the API everywhere:
 | 0 | every step executed, and verified where verification was asked for |
 | 1 | a step failed honestly — target missing, verification failed, timeout |
 | 2 | the question was malformed — bad flow file, missing session, unknown label |
-| 3 | refused — permission missing, unsupported platform, screen no longer matches, kill switch tripped, point outside its region, `--yes` absent |
+| 3 | refused — permission missing, unsupported platform, screen no longer matches, kill switch tripped, `--yes` absent |
 
 Splitting 3 from 2 matters: "I can't do this here" is operationally
 different from "you asked wrong", and a CI job wants to tell them apart.
@@ -30,8 +30,8 @@ corner of a screen. Tune or disable it with `failsafe` and
 ## Where steps come from
 
 Two spellings, one meaning. A flow file and a chain of argv verbs build
-the *same* `Flow`, so resolution, relocation, bounds, and verification
-are identical either way — and learning one teaches the other.
+the *same* `Flow`, so resolution, relocation, and verification are
+identical either way — and learning one teaches the other.
 
 ```bash
 pixelactions run --flow signup.toml --yes
@@ -87,8 +87,8 @@ Perform the flow. Without `--yes` it prints what it would do and exits 3
 
 Order of operations: resolve every label (a missing one fails the whole
 flow before any input), re-locate regions if `relocate` is on, refuse if
-any target cannot be found unambiguously, then step through — bounds
-check, act, verify. A failed step stops the run and the rest are
+any target cannot be found unambiguously, then step through — kill
+switch, act, verify. A failed step stops the run and the rest are
 recorded as skipped rather than silently dropped.
 
 `--json` emits a run report: per step, the points **actually used**

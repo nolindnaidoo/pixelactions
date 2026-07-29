@@ -12,17 +12,6 @@ use pixelcoords_core::session::SessionFile;
 use crate::convert::{ResolvedPoint, Space, to_space};
 use crate::flow::{Flow, Step};
 
-/// A resolved point plus the region that produced it, so a caller can
-/// check a corrected point still lands inside what the human marked.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Bounds {
-    pub label: String,
-    /// The region in global physical pixels — the space corrections
-    /// arrive in, so no conversion is needed to compare.
-    pub shape: pixelcoords_core::geometry::Shape,
-    pub monitor: usize,
-}
-
 /// One step, resolved to the points it will act on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlannedStep {
@@ -32,8 +21,6 @@ pub struct PlannedStep {
     /// Resolved points, in the order the step's targets appear. Empty for
     /// keyboard steps.
     pub points: Vec<ResolvedPoint>,
-    /// The regions those points came from, positionally paired.
-    pub bounds: Vec<Bounds>,
 }
 
 /// A whole flow, resolved. Holding one means every label existed and
@@ -64,18 +51,14 @@ pub fn plan(flow: &Flow, session: &SessionFile, space: Space) -> Result<Plan, Pl
     let mut steps = Vec::with_capacity(flow.steps.len());
     for (index, step) in flow.steps.iter().enumerate() {
         let mut points = Vec::new();
-        let mut bounds = Vec::new();
         for label in step.targets() {
-            let (point, region) = resolve_label(session, label, space)?;
-            points.push(point);
-            bounds.push(region);
+            points.push(resolve_label(session, label, space)?);
         }
         steps.push(PlannedStep {
             index,
             summary: step.summary(),
             step: step.clone(),
             points,
-            bounds,
         });
     }
     Ok(Plan { steps })
@@ -88,7 +71,7 @@ fn resolve_label(
     session: &SessionFile,
     label: &str,
     space: Space,
-) -> Result<(ResolvedPoint, Bounds), PlanError> {
+) -> Result<ResolvedPoint, PlanError> {
     let selection = session
         .selections
         .iter()
@@ -114,30 +97,11 @@ fn resolve_label(
     let global_x = monitor.origin_px.x + local.x;
     let global_y = monitor.origin_px.y + local.y;
 
-    let point = to_space(&session.monitors, global_x, global_y, space).ok_or(
-        PlanError::PointOffscreen {
-            label: label.to_string(),
-            x: global_x,
-            y: global_y,
-        },
-    )?;
-    let bounds = Bounds {
+    to_space(&session.monitors, global_x, global_y, space).ok_or(PlanError::PointOffscreen {
         label: label.to_string(),
-        shape: selection.global_px.clone(),
-        monitor: selection.monitor,
-    };
-    Ok((point, bounds))
-}
-
-/// Whether a global physical point lies inside the region it belongs to.
-///
-/// This is the guardrail: a corrected coordinate that has wandered
-/// outside its own marked region means the relocation found something
-/// else, and acting on it would click an unknown thing.
-pub fn within_bounds(bounds: &Bounds, global_x: i32, global_y: i32) -> bool {
-    bounds
-        .shape
-        .hit_test(pixelcoords_core::geometry::Point::new(global_x, global_y))
+        x: global_x,
+        y: global_y,
+    })
 }
 
 fn available_labels(session: &SessionFile) -> String {
@@ -230,7 +194,6 @@ mod tests {
         )
         .expect("planned");
         let point = plan.steps[0].points[0];
-        assert_eq!(plan.steps[0].bounds[0].label, "submit");
         // Rect 800,400 100x80 centers at 850,440 physical; /2 on a Retina
         // monitor.
         assert!((point.x - 425.0).abs() < f64::EPSILON);
@@ -317,33 +280,6 @@ mod tests {
         )
         .expect("planned");
         assert!(plan.steps[0].points.is_empty());
-    }
-
-    #[test]
-    fn a_point_inside_its_region_passes_the_bounds_check() {
-        let plan = plan(
-            &flow("[[step]]\naction = \"click\"\ntarget = \"submit\"\n"),
-            &session(),
-            Space::Physical,
-        )
-        .expect("planned");
-        let bounds = &plan.steps[0].bounds[0];
-        // The region's own center, in global physical pixels.
-        assert!(within_bounds(bounds, 850, 440));
-    }
-
-    #[test]
-    fn a_point_outside_its_region_fails_the_bounds_check() {
-        let plan = plan(
-            &flow("[[step]]\naction = \"click\"\ntarget = \"submit\"\n"),
-            &session(),
-            Space::Physical,
-        )
-        .expect("planned");
-        let bounds = &plan.steps[0].bounds[0];
-        // Far outside the 800,400 100x80 rect: a relocation that landed
-        // here found something else entirely.
-        assert!(!within_bounds(bounds, 2000, 1200));
     }
 
     #[test]

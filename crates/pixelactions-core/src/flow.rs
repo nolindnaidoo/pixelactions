@@ -151,10 +151,6 @@ pub struct Settings {
     /// Milliseconds between polls while waiting. Each poll is a screen
     /// capture, so this is a real cost, not a formality.
     pub poll_ms: u64,
-    /// Refuse to act at a point that falls outside its own region's
-    /// bounds. On by default: the marked region is the guardrail, not
-    /// just the target.
-    pub bounds: bool,
     /// Abort the run if the cursor is found in a screen corner before a
     /// step. The kill switch: grabbing the mouse is what a person does
     /// when automation goes wrong, and a corner needs no aim. On by
@@ -174,7 +170,6 @@ impl Default for Settings {
             settle_ms: 120,
             timeout_ms: 10_000,
             poll_ms: 400,
-            bounds: true,
             failsafe: true,
             failsafe_margin: 10.0,
         }
@@ -417,11 +412,6 @@ ms = 500
         assert_eq!(flow.settings.poll_ms, 250);
         assert_eq!(flow.targets(), vec!["dialog", "spinner"]);
         assert_eq!(flow.steps[2].summary(), "pause 500ms");
-    }
-
-    #[test]
-    fn bounds_enforcement_defaults_on() {
-        assert!(Flow::parse(MINIMAL).expect("valid").settings.bounds);
     }
 
     #[test]

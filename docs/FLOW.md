@@ -13,7 +13,6 @@ space = "auto"       # auto | physical | logical
 settle_ms = 120      # pause around each injected event
 timeout_ms = 10000   # how long a wait_* step may poll
 poll_ms = 400        # gap between polls; each poll is a screen capture
-bounds = true        # refuse points that leave their marked region
 failsafe = true      # stop if the cursor is slammed into a screen corner
 failsafe_margin = 10 # how close to a corner counts
 
@@ -106,9 +105,13 @@ and a flow file has none by design. That is a job for
 - **`space`** — `auto` means what this platform's input API expects:
   logical points on macOS, physical pixels on Windows and X11. Override
   only if you know why.
-- **`bounds`** (default `true`) — refuse a corrected point that lands
-  outside its own marked region. That combination means the crop matched
-  something else, and acting on it would click an unknown thing.
+- **Trusting a correction** is not a setting. A relocated point is acted
+  on when pixelcoords found it **unambiguously and above the score
+  floor**, and not otherwise. Distance is deliberately not part of that
+  test: one wheel click moves a page ~80 physical pixels, so any rule
+  tying a correction to its original rect would refuse every scrolled
+  UI while the match itself stayed perfect. A crop that matches in more
+  than one place produces no correction at all, and stops the run.
 - **`failsafe`** (default `true`) — the kill switch. Before every step,
   the cursor is read; if it is within `failsafe_margin` of any screen
   corner, the run stops without injecting that step. Grabbing the mouse

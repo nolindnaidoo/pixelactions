@@ -80,18 +80,14 @@ pub fn preflight(
     )
 }
 
-/// Every reason to decline a step before attempting it. Ordered by how
-/// little work each costs: reading the cursor is instant, the bounds
-/// check is arithmetic.
-fn guards(
-    flow: &Flow,
-    injector: &mut dyn Injector,
-    planned: &pixelactions_core::plan::PlannedStep,
-    corrections: &Corrections,
-    monitors: &[MonitorRecord],
-) -> Result<()> {
-    failsafe_gate(flow, injector, monitors)?;
-    bounds_gate(flow, planned, corrections, monitors)
+/// `Auto` resolved to what this platform's input API actually speaks —
+/// the space the cursor is read in, and the space corners must be
+/// compared in.
+fn resolve_space(space: Space) -> Space {
+    match space {
+        Space::Auto => native_space(),
+        other => other,
+    }
 }
 
 /// The kill switch, checked before every step.
@@ -129,39 +125,6 @@ fn failsafe_gate(
         "kill switch: the cursor is in a screen corner ({x:.0}, {y:.0}), so the run stopped \
          before this step. Move it away and run again, or set failsafe = false"
     )
-}
-
-/// Bounds enforcement, honoring the flow's setting.
-///
-/// Only steps that actually inject are gated. The guard exists to stop
-/// the tool *acting* on a region it may have mis-matched; a `verify` or
-/// `wait_for` injects nothing, and refusing one would remove the exact
-/// primitive a caller needs to find out where things went.
-fn bounds_gate(
-    flow: &Flow,
-    planned: &pixelactions_core::plan::PlannedStep,
-    corrections: &Corrections,
-    monitors: &[MonitorRecord],
-) -> Result<()> {
-    if !flow.settings.bounds || !injects(&planned.step) {
-        return Ok(());
-    }
-    check_bounds(planned, corrections, monitors)
-}
-
-/// Whether a step posts input, as opposed to only looking at the screen.
-fn injects(step: &Step) -> bool {
-    match step {
-        Step::Click { .. }
-        | Step::DoubleClick { .. }
-        | Step::Drag { .. }
-        | Step::Scroll { .. }
-        | Step::Type { .. }
-        | Step::Key { .. } => true,
-        Step::Verify { .. } | Step::WaitFor { .. } | Step::WaitGone { .. } | Step::Pause { .. } => {
-            false
-        }
-    }
 }
 
 /// Poll until a region is present (`want_present`) or absent, or the
@@ -318,7 +281,7 @@ pub fn execute(
 
         // Guards run first and are reported apart from failures: nothing
         // was attempted, and the run earns exit 3 rather than 1.
-        if let Err(refusal) = guards(flow, injector, planned, corrections, monitors) {
+        if let Err(refusal) = failsafe_gate(flow, injector, monitors) {
             steps.push(record_with(
                 planned,
                 StepOutcome::Refused,
@@ -400,59 +363,6 @@ fn corrected_points(
         .zip(planned.points.iter())
         .map(|(label, planned_point)| corrections.get(*label).copied().unwrap_or(*planned_point))
         .collect()
-}
-
-/// Refuse a step whose corrected point has wandered outside the region a
-/// human actually marked.
-///
-/// Relocation moves a point to wherever the crop matched. If that is no
-/// longer inside the marked region, the match found something else —
-/// and clicking it would be acting on an unknown thing.
-fn check_bounds(
-    planned: &pixelactions_core::plan::PlannedStep,
-    corrections: &Corrections,
-    monitors: &[MonitorRecord],
-) -> Result<()> {
-    for (index, bounds) in planned.bounds.iter().enumerate() {
-        let Some(corrected) = corrections.get(&bounds.label) else {
-            continue; // not relocated: the planner already proved it fits
-        };
-        let Some(monitor) = monitors.iter().find(|m| m.index == corrected.monitor) else {
-            continue;
-        };
-        // Corrections carry converted coordinates; bounds are global
-        // physical, so undo the scale before comparing.
-        let global_x = (corrected.x * scale_for(corrected.space, monitor.scale)).round() as i32;
-        let global_y = (corrected.y * scale_for(corrected.space, monitor.scale)).round() as i32;
-        if !pixelactions_core::plan::within_bounds(bounds, global_x, global_y) {
-            bail!(
-                "refusing step {}: {:?} relocated to ({global_x}, {global_y}), outside the \
-                 region you marked — the match found something else",
-                planned.index + 1,
-                bounds.label
-            );
-        }
-        let _ = index;
-    }
-    Ok(())
-}
-
-/// The multiplier that returns a converted coordinate to physical pixels.
-/// `Auto` resolved to what this platform's input API actually speaks —
-/// the space the cursor is read in, and the space corners must be
-/// compared in.
-fn resolve_space(space: Space) -> Space {
-    match space {
-        Space::Auto => native_space(),
-        other => other,
-    }
-}
-
-fn scale_for(space: Space, monitor_scale: f64) -> f64 {
-    match space {
-        Space::Logical => monitor_scale,
-        _ => 1.0,
-    }
 }
 
 /// Perform one step's input.
@@ -608,7 +518,6 @@ mod tests {
             summary: step.summary(),
             step,
             points,
-            bounds: Vec::new(),
         }
     }
 
@@ -1380,35 +1289,30 @@ mod tests {
     }
 
     #[test]
-    fn a_correction_outside_its_own_region_is_refused() {
-        // The guardrail: relocation found a match, but it landed outside
-        // the region a human marked — so it matched something else.
-        use pixelcoords_core::geometry::{Rect, Shape};
-        let flow = flow_with(Verify::None);
-        let mut plan = Plan {
+    fn a_region_that_moved_a_long_way_is_still_acted_on() {
+        // Distance is not evidence. A scrolled page moves a region far
+        // outside the rect it was marked in, while the match stays
+        // perfect — measured at 80 physical pixels per wheel click
+        // against a 60px-tall region. Refusing on distance made
+        // relocation useless on anything that scrolls, so the trust
+        // decision belongs to pixelcoords: unambiguous and above the
+        // score floor, or no correction at all.
+        let mut corrections = Corrections::new();
+        corrections.insert("submit".into(), point(10.0, 10.0));
+        let plan = Plan {
             steps: vec![planned(
                 0,
                 Step::Click {
                     target: "submit".into(),
                 },
-                vec![point(10.0, 10.0)],
+                vec![point(900.0, 700.0)],
             )],
         };
-        plan.steps[0].bounds = vec![pixelactions_core::plan::Bounds {
-            label: "submit".into(),
-            shape: Shape::Rect(Rect::new(800, 400, 100, 80)),
-            monitor: 0,
-        }];
-        let mut corrections = Corrections::new();
-        // Logical (10, 10) on a 2x monitor is global physical (20, 20) —
-        // nowhere near the marked rect.
-        corrections.insert("submit".into(), point(10.0, 10.0));
-
         let mut injector = Recording::default();
         let report = execute(
             &mut injector,
             &Context {
-                flow: &flow,
+                flow: &flow_with(Verify::None),
                 plan: &plan,
                 session: Path::new("/tmp/session"),
                 monitors: &monitors(),
@@ -1416,11 +1320,30 @@ mod tests {
             },
             &mut always_found(),
         );
-        assert_eq!(report.steps[0].outcome, StepOutcome::Refused);
-        assert_eq!(report.exit_code(), 3, "declining to act is not a failure");
-        assert!(injector.events.is_empty(), "nothing was injected");
-        let detail = report.steps[0].detail.clone().expect("explained");
-        assert!(detail.contains("outside the region"), "detail: {detail}");
+        assert_eq!(report.steps[0].outcome, StepOutcome::Executed);
+        assert_eq!(
+            injector.events,
+            vec!["move 10,10", "click"],
+            "acts where the region is now, not where it was marked"
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_region_never_produces_a_correction_to_act_on() {
+        // What actually guards against acting on the wrong thing, now
+        // that distance does not: a crop matching in more than one place
+        // yields no correction, and preflight refuses the run outright.
+        let report: verify::FindReport = serde_json::from_str(
+            r#"{"all_relocated":false,"results":[{"label":"submit","found":true,"ambiguous":true,"score":1.0,"monitor":0,"new_px":{"x":10,"y":10,"w":4,"h":4}}]}"#,
+        )
+        .expect("fixture");
+        assert!(!report.is_confirmed("submit"));
+        assert!(
+            report.corrected_point("submit").is_none(),
+            "an ambiguous match must never become a point to act on"
+        );
+        let corrections = corrections(&report, &["submit"], &monitors(), Space::Logical);
+        assert!(corrections.is_empty());
     }
 
     #[test]

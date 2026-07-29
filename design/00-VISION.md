@@ -48,9 +48,13 @@ reports exactly which step lied. Actions stop being fire-and-forget.
   unsupported compositor) rather than guess silently.
 - One small native binary. No runtime, no daemon unless a platform
   forces one.
-- Safety is a feature: dry-run first-class, bounds enforcement (never
-  act outside marked regions unless told), kill-switch, human-visible
-  action log.
+- Safety is a feature: dry-run first-class, kill-switch, human-visible
+  action log, and a refusal to act on any region pixelcoords could not
+  identify unambiguously. (An early "never act outside the marked
+  region" rule was **removed** — measured on hardware, one wheel click
+  moves a page ~80px against a 60px region, so it refused every scrolled
+  UI while the match itself was perfect. Ambiguity is the real signal;
+  distance is not. See `07-MILESTONES.md`.)
 - The session.json contract is the seam: pixelactions consumes it,
   never redefines it.
 

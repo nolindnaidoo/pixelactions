@@ -33,10 +33,10 @@
     not "it worked"**, and this is where that distinction lives.
   - `skipped` — an earlier step failed
   - `failed` — the step or its verification failed; `detail` says why
-  - `refused` — a guard declined *before* anything was attempted: the
-    kill switch (a cursor in a screen corner) or a point outside its own
-    marked region. Distinct from `failed` because a failure may be worth
-    retrying and a refusal never is. A run containing one exits 3.
+  - `refused` — a guard declined *before* anything was attempted; today
+    that means the kill switch, a cursor found in a screen corner.
+    Distinct from `failed` because a failure may be worth retrying and a
+    refusal never is. A run containing one exits 3.
 
 ## Plan report (`plan --json`)
 

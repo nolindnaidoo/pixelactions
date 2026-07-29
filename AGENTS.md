@@ -23,7 +23,8 @@ line protocol. Windows and X11 are the next milestone. See
 **The three surfaces are one implementation.** Chained verbs and a
 protocol request both build the same `Flow` and go through the same
 `plan` → `run::execute` path. When adding behavior, add it there — a
-surface that grows its own copy of relocation, bounds, or verification
+surface that grows its own copy of relocation, the kill switch, or
+verification
 is a bug, because the three will drift and only one will be tested.
 
 ## Layout
@@ -122,10 +123,19 @@ need:
   nothing.
 - **Reports distinguish "executed" from "verified".** "Nothing errored"
   is not "it worked", and the wire format says which.
-- Injection got its watchdog, bounds enforcement, and kill switch before
-  it got convenience features. The kill switch is a corner check on the
-  cursor before every step; it must stay on the path every surface
-  takes, which is `run::execute`.
+- Injection got its watchdog and kill switch before it got convenience
+  features. The kill switch is a corner check on the cursor before every
+  step; it must stay on the path every surface takes, which is
+  `run::execute`.
+- **A correction is trusted on pixelcoords' evidence, never on
+  distance.** An earlier guard refused any relocated point that left the
+  rect it was marked in. Measured on real hardware, one wheel click
+  moves a page ~80 physical pixels against a 60px-tall region, so that
+  rule refused every scrolled UI while the match itself scored 1.000 —
+  it made relocation useless on exactly the surfaces relocation is for.
+  What guards the real risk is `ambiguous`: a crop matching in more than
+  one place yields no correction and stops the run. Do not reintroduce a
+  proximity test.
 - **`serve` listens on stdio and nowhere else.** No socket, no port, no
   daemon. This process holds the permission to click and type; a
   listener would lend that permission to anything that can reach it.

@@ -67,7 +67,7 @@ form of `action = "click"` — so there is one set of verbs to learn.
 
 `settings` on the handshake takes the same fields as a flow file's
 `[settings]` table (`relocate`, `verify`, `space`, `settle_ms`,
-`timeout_ms`, `poll_ms`, `bounds`, `failsafe`, `failsafe_margin`) and
+`timeout_ms`, `poll_ms`, `failsafe`, `failsafe_margin`) and
 applies for the whole session.
 Unknown keys are an error, not a silent default — see
 [FLOW.md](FLOW.md) for what each one means.
@@ -88,8 +88,8 @@ Exactly one response per request, tagged by `result`.
 `outcome` uses the run report's vocabulary: **`verified`** (it ran and a
 fresh capture confirmed it), **`executed`** (it ran; verification was not
 asked for), **`failed`** (it ran and did not work — `detail` says why),
-**`refused`** (a guard declined before anything was attempted — the kill
-switch, or a point outside its own region).
+**`refused`** (a guard declined before anything was attempted — today,
+the kill switch).
 
 **`done` vs `error` is the same line the exit codes draw between 1 and
 2.** A step that ran and failed honestly is a `done` with

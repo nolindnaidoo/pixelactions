@@ -30,9 +30,19 @@ call an executor actually wants.
 - `doctor` — Accessibility grant state, displays, scale factors
 
 **Landed here rather than later**, because each turned out to be small
-once the run loop existed: `wait_for` / `wait_gone` polling, bounds
-enforcement, the watchdog, the corner kill switch, and all three drive
-surfaces (chained argv, flow files, `serve`).
+once the run loop existed: `wait_for` / `wait_gone` polling, the
+watchdog, the corner kill switch, and all three drive surfaces (chained
+argv, flow files, `serve`).
+
+**Built, then removed:** bounds enforcement — refusing a relocated point
+that landed outside the rect it was marked in. It sounded right and was
+measurably wrong: one wheel click moves a page ~80 physical pixels
+against a 60px-tall region, so a single scroll locked a label out
+permanently while pixelcoords still matched it at score 1.000, reporting
+"the match found something else" when it had found exactly the right
+thing. It contradicted the headline promise that a session keeps working
+as the UI moves. What guards the real risk — a crop matching the *wrong*
+instance — is `ambiguous`, which yields no correction and stops the run.
 
 **Deliberately out:** Windows, Linux, MCP.
 
@@ -58,8 +68,8 @@ platforms, and CI proves it on a headed runner where possible.
 ## 0.3.0 — safety and orchestration
 
 What remains here after the early landings above: an audit log.
-Observable polling, bounds enforcement, the watchdog, and the kill
-switch shipped in 0.1.0. The kill switch landed as a corner check on
+Observable polling, the watchdog, and the kill switch shipped in
+0.1.0. The kill switch landed as a corner check on
 the cursor rather than a listener thread — no background thread, no
 extra permission, no global hotkey to conflict with. This is what makes it
 trustworthy for unattended runs — the difference between a convenience

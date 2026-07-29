@@ -18,7 +18,7 @@ session = "~/Downloads/pixelcoords-captures/20260728-182121-117"
 [settings]
 verify = "each"        # each | end | none
 relocate = true        # run find first; act on corrected coordinates
-bounds = "strict"      # strict: never act outside a marked region
+bounds = "strict"      # NOT BUILT — see below
 timeout_ms = 5000      # per-step observable wait
 
 [[step]]
@@ -46,6 +46,11 @@ target = "confirmation"   # poll until the region matches its saved crop
 action = "assert"
 target = "confirmation"   # verify state; failure fails the run
 ```
+
+`bounds` was built and then **removed**: refusing a correction that left
+its original rect made relocation useless on any scrolling UI, while the
+match it rejected scored 1.000. Ambiguity, not distance, is what
+distinguishes a wrong match. See `07-MILESTONES.md`.
 
 Open questions this format has to answer:
 - Do steps need explicit monitor scoping, or is the label enough

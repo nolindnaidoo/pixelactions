@@ -98,9 +98,10 @@ instead of the two we could afford to embed.
   re-located against a fresh capture; a region that moved yields
   corrected coordinates, so a session captured last month still works.
 - **It refuses rather than guesses.** A region that can't be found
-  unambiguously stops the run before anything is injected. A corrected
-  point that lands outside its own marked region is refused too — that
-  combination means the crop matched something else.
+  unambiguously stops the run before anything is injected. Ambiguity is
+  the test, not distance: a match found in one place is that region
+  however far it moved, which is what lets a flow survive a scrolled
+  page.
 - **It distinguishes "executed" from "verified".** The OS accepting an
   event is not the app reacting to one, and the report says which
   happened.
