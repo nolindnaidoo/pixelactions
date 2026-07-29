@@ -162,6 +162,23 @@ for each platform's conventions and known off-by-ones.
 
 ## Releases
 
+Before every publish, walk this list — the ones with easy misses first:
+
+1. **Update the install snippet in `crates/pixelactions-core/README.md`.**
+   A pre-1.0 caret pin like `= "0.1"` resolves to the newest 0.1.x, not
+   0.2.x — so a reader copy-pasting from crates.io lands on the old API.
+   Bump the string to the current minor before every minor cut. (The
+   sister project shipped a release without this and had to cut a patch
+   solely to fix the crates.io page.)
+2. Bump the workspace version and the `pixelcoords-core` dep pin in
+   both `crates/pixelactions-core/Cargo.toml` and
+   `crates/pixelactions/Cargo.toml` if pixelcoords-core has moved.
+3. Write the CHANGELOG entry.
+4. Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+   -- -D warnings`, `cargo test --workspace`.
+5. Dry-run: `cargo publish -p pixelactions-core --dry-run`.
+
+
 Versioning policy (also stated in [CHANGELOG.md](../CHANGELOG.md)):
 pre-1.0, **minor** for features and any break to the CLI, the flow file,
 or the line protocol; **patch** for fixes; 1.0.0 when those three are

@@ -15,7 +15,11 @@ capture, act, and confirm. Windows and X11 are the next milestone.
 Requires **pixelcoords 0.1.2 or newer**, enforced before any run — older
 captures composite the mouse pointer into the image, which makes
 relocation unreliable in a way that presents as flakiness rather than a
-version problem.
+version problem. The library dep on
+[`pixelcoords-core`](https://crates.io/crates/pixelcoords-core) is at
+`0.2`, which is what current pixelcoords ships; only the session-schema
+types are used from it, and those did not change between the 0.1 and 0.2
+lines.
 
 ### The three drive surfaces
 

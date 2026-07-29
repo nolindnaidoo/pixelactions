@@ -14,7 +14,7 @@ categories.workspace = true
 
 [dependencies]
 pixelactions-core = { path = "../pixelactions-core", version = "0.1.0" }
-pixelcoords-core = "0.1"
+pixelcoords-core = "0.2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
