@@ -64,14 +64,22 @@ struct Server<'a> {
 /// Read requests until stdin closes or the client says `bye`.
 pub fn run(session_directory: &Path) -> Result<i32> {
     if !cfg!(target_os = "macos") {
-        eprintln!(
-            "pixelactions: input synthesis is macOS-only in this build — \
-             `plan` works everywhere"
-        );
-        return Ok(crate::EXIT_REFUSED);
+        return Ok(refuse_on_stdout(
+            "input synthesis is macOS-only in this build — `plan` works everywhere",
+        ));
     }
-    let session = session::load(session_directory)?;
-    let mut injector = crate::make_injector()?;
+    let session = match session::load(session_directory) {
+        Ok(session) => session,
+        Err(error) => return Ok(refuse_on_stdout(&format!("{error:#}"))),
+    };
+    // A startup failure has to reach the client as *protocol*. A client
+    // reads stdout and is told never to treat stderr as failure, so
+    // dying with the explanation only on stderr would leave it staring
+    // at a closed pipe with no idea why.
+    let mut injector = match crate::make_injector() {
+        Ok(injector) => injector,
+        Err(error) => return Ok(refuse_on_stdout(&format!("{error:#}"))),
+    };
     let mut server = Server {
         session_path: session_directory.to_path_buf(),
         session,
@@ -290,6 +298,16 @@ impl Server<'_> {
             blocked.join(", ")
         ))
     }
+}
+
+/// Emit one protocol error and refuse, for failures that happen before
+/// the loop can start. Exits 3, the same code the CLI uses for "I
+/// declined to act", so a caller reading only the exit status still
+/// learns the right thing.
+fn refuse_on_stdout(detail: &str) -> i32 {
+    print!("{}", Response::error(None, detail).to_line());
+    let _ = std::io::stdout().flush();
+    crate::EXIT_REFUSED
 }
 
 /// Whether a step moves the mouse or keyboard, as opposed to only

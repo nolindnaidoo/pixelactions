@@ -29,6 +29,18 @@ The framing is the one LSP, esbuild, and MCP all converged on.
   click and type on your machine; a listener would lend that permission
   to anything that can reach the port.
 
+## When it cannot start
+
+A session that does not exist, or a missing input permission, is
+reported the same way as anything else: **one `error` line on stdout**,
+then the process exits 3. A startup failure that only reached stderr
+would leave a client staring at a closed pipe, and the rule above says
+stderr is never failure — so it would have no idea why.
+
+```
+{"result":"error","detail":"cannot read /nope/session: No such file or directory (os error 2)"}
+```
+
 ## Requests
 
 `do` names either a control message or a step. The step vocabulary is
