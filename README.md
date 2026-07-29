@@ -18,9 +18,6 @@
   </a>
 </p>
 
-The executor half of the pixelcoords loop: **consume human-verified
-coordinates, perform the interaction, confirm it landed.**
-
 [pixelcoords](https://github.com/nolindnaidoo/pixelcoords) freezes your
 screen, lets you mark labeled regions, and writes pixel-exact
 coordinates with crops, drift re-location, and point verification.
@@ -31,11 +28,36 @@ pixelactions reads that session and acts on it — referencing regions by
 find  →  act  →  assert
 ```
 
+No account, no network surface, no daemon — one small native binary that
+runs, acts, and exits. MIT-licensed, because the aim was to build the
+best executor in this category and give it away.
+
 ## Status
 
 **Early, and macOS only.** The loop works end to end: resolve a label to
 its click point, re-locate it against a fresh capture, act, and confirm.
-Windows and X11 are next; nothing here is published yet.
+Windows and X11 are next; no crate or binaries are published yet.
+
+## Install
+
+Prebuilt binaries will be on the
+[releases page](https://github.com/nolindnaidoo/pixelactions/releases)
+once published — download, unpack, run. Or build it with cargo:
+
+```bash
+cargo install pixelactions
+```
+
+Rust 1.88+ for the cargo route. pixelactions drives the pixelcoords
+binary for capture-time work — install both:
+
+```bash
+cargo install pixelcoords pixelactions
+```
+
+macOS asks for an Accessibility grant on first run. The grant attaches
+to the terminal that launches pixelactions, not the binary —
+`pixelactions doctor --probe` proves the grant instead of assuming it.
 
 ## Three ways to drive it
 
@@ -101,7 +123,7 @@ One long-lived process speaking JSON on stdin/stdout, so **a program in
 any language owns the loop** — branching on what's on screen, retrying
 with different data, reading a CSV, calling an API between steps. The
 client above is forty lines of stdlib Python, in
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
+[docs/PROTOCOL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md).
 
 Escalate on a symptom, not a feature list: one command, then chained
 commands, then the protocol when you need loops, branching, and data.
@@ -133,10 +155,22 @@ instead of the two we could afford to embed.
 - **Exit codes are the API**: 0 done, 1 a step failed, 2 malformed
   question, 3 refused.
 
+## Platform status
+
+| Platform | State |
+|----------|-------|
+| macOS | Supported — the loop works end to end; primary development platform |
+| Windows | Next — the goal is the same flow file running unmodified |
+| Linux (X11) | Next — alongside Windows |
+| Linux (Wayland) | Later — after Windows and X11 |
+
+No crate or binaries are published yet. This table is kept honest —
+claims match runs.
+
 ## Non-goals
 
 Settled, so the same debates don't reopen. The full list with reasoning
-is in [design/05-NON-GOALS.md](design/05-NON-GOALS.md).
+is in [design/05-NON-GOALS.md](https://github.com/nolindnaidoo/pixelactions/blob/main/design/05-NON-GOALS.md).
 
 - **No embedded interpreter** — not Python, not JS, not Lua. Your bot is
   written in your language and drives this over a pipe, which is why it
@@ -155,20 +189,16 @@ is in [design/05-NON-GOALS.md](design/05-NON-GOALS.md).
 
 ## Documentation
 
-- [docs/FLOW.md](docs/FLOW.md) — the flow file: every step and setting
-- [docs/CLI.md](docs/CLI.md) — commands, chained verbs, exit codes
-- [docs/PROTOCOL.md](docs/PROTOCOL.md) — the line protocol, with a client
-- [docs/OUTPUT.md](docs/OUTPUT.md) — run, plan, and doctor reports
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — builds, CI gates, releases
-- [SKILL.md](SKILL.md) — for coding agents driving this tool
-- [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md)
-
-## Design
-
-The full design set lives in [`design/`](design/README.md): market
-research, the input-injection foundations per platform, architecture
-decisions, the spec draft, non-goals, milestones, and the contract
-between the two tools.
+- [pixelactions.dev](https://pixelactions.dev) — the website: the loop, comparisons, how-to
+- [docs/CLI.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/CLI.md) — commands, chained verbs, the kill switch, exit codes
+- [docs/FLOW.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/FLOW.md) — the flow file: every step and setting
+- [docs/PROTOCOL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md) — the line protocol, with a client in full
+- [docs/OUTPUT.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/OUTPUT.md) — run, plan, and doctor reports
+- [docs/DEVELOPMENT.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/DEVELOPMENT.md) — builds, CI gates, releases
+- [SKILL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/SKILL.md) — for coding agents driving this tool
+- [design/](https://github.com/nolindnaidoo/pixelactions/blob/main/design/README.md) — market research, foundations, decisions, milestones, the two-tool contract
+- [CHANGELOG.md](https://github.com/nolindnaidoo/pixelactions/blob/main/CHANGELOG.md) — what changed and why
+- [CONTRIBUTING.md](https://github.com/nolindnaidoo/pixelactions/blob/main/CONTRIBUTING.md) — bug reports and pull requests
 
 ## Why this exists
 
@@ -180,4 +210,8 @@ computer-use agents shell out to xdotool in containers. Coordinates are
 the layer that works where accessibility trees don't exist — canvas
 apps, games, streamed desktops, legacy software.
 
-MIT. Built by [nolindnaidoo](https://github.com/nolindnaidoo).
+## License
+
+MIT — see [LICENSE](https://github.com/nolindnaidoo/pixelactions/blob/main/LICENSE).
+
+Built by [nolindnaidoo](https://github.com/nolindnaidoo).
