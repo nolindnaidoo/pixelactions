@@ -105,6 +105,26 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
     let mut verifier =
         |session: &std::path::Path, label: Option<&str>| verify::find(session, label);
 
+    if !json {
+        println!("session: {}", session_path.display());
+        println!();
+    }
+    // Say what the pause is. Confirming a region is a real screen capture
+    // and a template match — seconds, not milliseconds — and a terminal
+    // that sits blank through it looks hung rather than careful.
+    let checking = flow.acting_targets();
+    if flow.settings.relocate && !checking.is_empty() {
+        eprintln!("checking {} region(s) before acting", checking.len());
+    }
+    // Reported one at a time, because each is a real capture and match —
+    // roughly a second and a half apiece. A single line up front would go
+    // quiet for as long as the check takes.
+    let found = |label: &str| {
+        use std::io::Write;
+        eprintln!("  found {label}");
+        let _ = std::io::stderr().flush();
+    };
+
     // Refuse before acting when the screen has drifted from the capture:
     // clicking coordinates whose regions have moved is vandalism, not
     // automation.
@@ -114,6 +134,7 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
         &session.monitors,
         space,
         &mut verifier,
+        &found,
     ) {
         Ok(corrections) => corrections,
         Err(refusal) => {
@@ -128,6 +149,13 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
         );
     }
 
+    // Machine output is one document, so it cannot be streamed; a human
+    // watching an eleven-second run should see each step as it finishes
+    // rather than a silent terminal and then a wall of text.
+    let live = |step: &pixelactions_core::report::StepReport| print_step(step);
+    let progress: &dyn Fn(&pixelactions_core::report::StepReport) =
+        if json { run::silent() } else { &live };
+
     let mut injector = make_injector()?;
     let report = run::execute(
         injector.as_mut(),
@@ -139,14 +167,13 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
             corrections: &corrections,
             // Preflight just swept every region this run will act on.
             checked: flow.settings.relocate,
+            progress,
         },
         &mut verifier,
     );
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        print_report(&report);
     }
     Ok(report.exit_code())
 }
@@ -161,23 +188,27 @@ pub fn make_injector() -> Result<Box<dyn inject::Injector>> {
     anyhow::bail!("input synthesis is not implemented for this platform yet")
 }
 
-fn print_report(report: &pixelactions_core::report::RunReport) {
-    println!("session: {}", report.session);
-    println!();
-    for step in &report.steps {
-        // Padded to a fixed width so the step list reads as a column.
-        let mark = format!("{:<8}", step.outcome.name());
-        println!(
-            "  {} {:>2}. {} ({} ms)",
-            mark,
-            step.index + 1,
-            step.summary,
-            step.elapsed_ms
-        );
-        if let Some(detail) = &step.detail {
-            println!("            {detail}");
-        }
+/// One finished step, printed as it lands.
+///
+/// Flushed rather than left to line buffering: a run spends seconds in
+/// screen captures, and a step that has finished should be on screen
+/// before the next one starts, whether stdout is a terminal or a pipe.
+fn print_step(step: &pixelactions_core::report::StepReport) {
+    use std::io::Write;
+
+    // Padded to a fixed width so the step list reads as a column.
+    let mark = format!("{:<8}", step.outcome.name());
+    println!(
+        "  {} {:>2}. {} ({} ms)",
+        mark,
+        step.index + 1,
+        step.summary,
+        step.elapsed_ms
+    );
+    if let Some(detail) = &step.detail {
+        println!("            {detail}");
     }
+    let _ = std::io::stdout().flush();
 }
 
 /// Where a run's steps came from: a flow file, or verbs chained on the

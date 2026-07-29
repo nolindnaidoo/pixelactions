@@ -49,51 +49,66 @@ pub fn preflight(
     monitors: &[MonitorRecord],
     space: Space,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
+    found: &dyn Fn(&str),
 ) -> Result<Corrections> {
     if !flow.settings.relocate {
         return Ok(Corrections::new());
     }
-    let targets = flow.targets();
+    // Only the regions this run will *act on*. A `wait_for` is waiting for
+    // something that is not there yet, and a `wait_gone` succeeds precisely
+    // when its region is absent — demanding either up front made both verbs
+    // impossible to use from the command line. Matching their templates
+    // anyway is pure cost: a whole-session sweep of three regions measured
+    // 5.2s against 1.5s per region.
+    let targets = flow.acting_targets();
     if targets.is_empty() {
         return Ok(Corrections::new());
     }
 
-    let report = verifier(session, None)?;
-    // Only the regions this run will *act on* have to be present. A
-    // `wait_for` is waiting for something that is not there yet, and a
-    // `wait_gone` succeeds precisely when its region is absent —
-    // demanding either up front made both verbs impossible to use from
-    // the command line.
-    let unconfirmed: Vec<String> = flow
-        .acting_targets()
-        .iter()
-        .filter(|label| !report.is_confirmed(label))
-        .map(|label| {
+    match locate_each(&targets, session, monitors, space, verifier, found)? {
+        Ok(corrections) => Ok(corrections),
+        Err(unconfirmed) => bail!(
+            "the screen no longer matches the session: {}. Re-mark with pixelcoords, or set \
+             relocate = false in the flow to act on the saved coordinates anyway",
+            unconfirmed.join("; ")
+        ),
+    }
+}
+
+/// Confirm each label on its own, and report where the ones that moved are
+/// now.
+///
+/// One template at a time on purpose. Matching is the expensive half of a
+/// find, and a caller that needs two regions should not pay to match every
+/// other region in the session. The outer `Result` is a broken verifier;
+/// the inner one is the answer — corrections, or the labels that could not
+/// be confirmed, described.
+fn locate_each(
+    targets: &[&str],
+    session: &Path,
+    monitors: &[MonitorRecord],
+    space: Space,
+    verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
+    found: &dyn Fn(&str),
+) -> Result<std::result::Result<Corrections, Vec<String>>> {
+    let mut located = Corrections::new();
+    let mut unconfirmed = Vec::new();
+    for label in targets {
+        let report = verifier(session, Some(label))?;
+        if !report.is_confirmed(label) {
             let reason = report
                 .result_for(label)
                 .map_or_else(|| "not in the report".to_string(), describe);
-            format!("{label} ({reason})")
-        })
-        .collect();
-
+            unconfirmed.push(format!("{label} ({reason})"));
+            continue;
+        }
+        located.extend(corrections(&report, &[label], monitors, space));
+        found(label);
+    }
     if unconfirmed.is_empty() {
-        return Ok(corrections(&report, &targets, monitors, space));
+        return Ok(Ok(located));
     }
-    bail!(
-        "the screen no longer matches the session: {}. Re-mark with pixelcoords, or set \
-         relocate = false in the flow to act on the saved coordinates anyway",
-        unconfirmed.join("; ")
-    )
-}
-
-/// `Auto` resolved to what this platform's input API actually speaks —
-/// the space the cursor is read in, and the space corners must be
-/// compared in.
-fn resolve_space(space: Space) -> Space {
-    match space {
-        Space::Auto => native_space(),
-        other => other,
-    }
+    Ok(Err(unconfirmed))
 }
 
 /// Confirm, immediately before a step acts, that the regions it is about
@@ -131,35 +146,40 @@ fn precheck(
         return Ok(());
     }
 
-    // One template at a time. Matching is the expensive half of a find —
-    // sweeping the whole session to check a single click costs seconds on a
-    // large display, and a step only needs the regions it is about to
-    // touch.
-    let mut unconfirmed = Vec::new();
-    for label in &targets {
-        let report = verifier(session, Some(label))?;
-        if !report.is_confirmed(label) {
-            let reason = report
-                .result_for(label)
-                .map_or_else(|| "not in the report".to_string(), describe);
-            unconfirmed.push(format!("{label} ({reason})"));
-            continue;
-        }
-        // Keep this label's coordinate current, and drop a correction that
-        // no longer applies — a region can move back to where it started.
-        let fresh = corrections(&report, &[label], monitors, flow.settings.space);
-        match fresh.get(*label) {
-            Some(point) => known.insert((*label).to_string(), *point),
-            None => known.remove(*label),
-        };
-    }
-    if !unconfirmed.is_empty() {
-        bail!(
+    match locate_each(
+        &targets,
+        session,
+        monitors,
+        flow.settings.space,
+        verifier,
+        &|_| {},
+    )? {
+        Err(unconfirmed) => bail!(
             "cannot act on {}. Nothing was injected for this step",
             unconfirmed.join("; ")
-        );
+        ),
+        Ok(fresh) => {
+            // Replace what is known about *these* labels only. A region can
+            // also move back to where it started, so a label absent from
+            // `fresh` must lose its stale correction rather than keep it.
+            for label in &targets {
+                match fresh.get(*label) {
+                    Some(point) => known.insert((*label).to_string(), *point),
+                    None => known.remove(*label),
+                };
+            }
+            Ok(())
+        }
     }
-    Ok(())
+}
+
+/// `Auto` resolved to what this platform's input API actually speaks —
+/// the space the cursor is read in, and the space corners are compared in.
+fn resolve_space(space: Space) -> Space {
+    match space {
+        Space::Auto => native_space(),
+        other => other,
+    }
 }
 
 /// The kill switch, checked before every step.
@@ -330,6 +350,18 @@ pub struct Context<'a> {
     /// once and then steps through, while the protocol server calls this
     /// per request with no preflight at all.
     pub checked: bool,
+    /// Called as each step finishes, before the next one starts.
+    ///
+    /// A run takes seconds — each check is a real screen capture — and a
+    /// tool that prints nothing until it is done looks hung. The report is
+    /// still returned whole; this is how a caller shows it arriving.
+    pub progress: &'a dyn Fn(&StepReport),
+}
+
+/// A `progress` that reports nowhere, for callers that only want the
+/// finished report.
+pub fn silent() -> &'static dyn Fn(&StepReport) {
+    &|_: &StepReport| {}
 }
 
 pub fn execute(
@@ -344,6 +376,7 @@ pub fn execute(
         monitors,
         corrections,
         checked,
+        progress,
     } = *context;
     let started = Instant::now();
     let settle = Duration::from_millis(flow.settings.settle_ms);
@@ -358,16 +391,20 @@ pub fn execute(
 
     for planned in &plan.steps {
         if failed {
-            steps.push(record(planned, StepOutcome::Skipped, None, 0));
+            let skipped = record(planned, StepOutcome::Skipped, None, 0);
+            progress(&skipped);
+            steps.push(skipped);
             continue;
         }
         if started.elapsed() > WATCHDOG {
-            steps.push(record(
+            let timed_out = record(
                 planned,
                 StepOutcome::Failed,
                 Some("watchdog: the run exceeded its time budget".into()),
                 0,
-            ));
+            );
+            progress(&timed_out);
+            steps.push(timed_out);
             failed = true;
             continue;
         }
@@ -383,13 +420,15 @@ pub fn execute(
             precheck(flow, planned, session, monitors, &mut corrections, verifier)
         });
         if let Err(refusal) = gate {
-            steps.push(record_with(
+            let refused = record_with(
                 planned,
                 StepOutcome::Refused,
                 Some(format!("{refusal:#}")),
                 step_started.elapsed().as_millis() as u64,
                 corrected_points(planned, &corrections),
-            ));
+            );
+            progress(&refused);
+            steps.push(refused);
             failed = true;
             continue;
         }
@@ -402,19 +441,21 @@ pub fn execute(
             .and_then(|()| confirm(flow, &planned.step, session, verifier));
         let elapsed = step_started.elapsed().as_millis() as u64;
 
-        match outcome {
-            Ok(outcome) => steps.push(record_with(planned, outcome, None, elapsed, points)),
+        let done = match outcome {
+            Ok(outcome) => record_with(planned, outcome, None, elapsed, points),
             Err(error) => {
-                steps.push(record_with(
+                failed = true;
+                record_with(
                     planned,
                     StepOutcome::Failed,
                     Some(format!("{error:#}")),
                     elapsed,
                     points,
-                ));
-                failed = true;
+                )
             }
-        }
+        };
+        progress(&done);
+        steps.push(done);
     }
 
     RunReport {
@@ -672,6 +713,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -708,6 +750,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -753,6 +796,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -816,6 +860,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -850,6 +895,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &corrections,
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -879,6 +925,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -917,6 +964,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut once,
         );
@@ -952,6 +1000,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -981,6 +1030,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -1031,6 +1081,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut never_found(),
         );
@@ -1068,6 +1119,7 @@ mod tests {
                     monitors: &monitors(),
                     corrections: &Corrections::new(),
                     checked: false,
+                    progress: silent(),
                 },
                 &mut always_found(),
             );
@@ -1108,6 +1160,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut once,
         );
@@ -1161,6 +1214,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut drifting,
         );
@@ -1193,6 +1247,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut never_found(),
         );
@@ -1237,6 +1292,7 @@ mod tests {
             &monitors(),
             Space::Logical,
             &mut moved_up(),
+            &|_| {},
         )
         .expect("regions found");
 
@@ -1266,6 +1322,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &corrections,
                 checked: false,
+                progress: silent(),
             },
             &mut moved_up(),
         );
@@ -1285,6 +1342,7 @@ mod tests {
             &monitors(),
             Space::Logical,
             &mut never_found(),
+            &|_| {},
         )
         .expect_err("must refuse");
         let message = format!("{error:#}");
@@ -1306,6 +1364,7 @@ mod tests {
             &monitors(),
             Space::Logical,
             &mut never_found(),
+            &|_| {},
         )
         .expect("no preflight");
         assert!(corrections.is_empty());
@@ -1359,6 +1418,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut appears_after(3),
         );
@@ -1390,6 +1450,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut never_found(),
         );
@@ -1432,6 +1493,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut ambiguous,
         );
@@ -1463,6 +1525,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut never_found(),
         );
@@ -1499,6 +1562,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut never_found(),
         );
@@ -1535,6 +1599,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &corrections,
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );
@@ -1581,6 +1646,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut never_found(),
         );
@@ -1608,6 +1674,7 @@ mod tests {
                 monitors: &monitors(),
                 corrections: &Corrections::new(),
                 checked: false,
+                progress: silent(),
             },
             &mut always_found(),
         );

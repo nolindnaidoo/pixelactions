@@ -86,9 +86,16 @@ Perform the flow. Without `--yes` it prints what it would do and exits 3
 — injection is never a side effect of a typo.
 
 Order of operations: resolve every label (a missing one fails the whole
-flow before any input), re-locate regions if `relocate` is on, refuse if
-any target cannot be found unambiguously, then step through — kill
-switch, act, verify. A failed step stops the run and the rest are
+flow before any input), re-locate the regions the run will **act on** if
+`relocate` is on — not the ones it merely waits for — refuse if any of
+them cannot be found unambiguously, then step through: kill switch,
+check, act.
+
+**Output arrives as it happens.** Confirming a region is a real screen
+capture and template match, so a run takes seconds; each region found and
+each step finished prints immediately rather than after the run. `--json`
+is the exception: machine output is a single document, so it is written
+once at the end. A failed step stops the run and the rest are
 recorded as skipped rather than silently dropped.
 
 `--json` emits a run report: per step, the points **actually used**
