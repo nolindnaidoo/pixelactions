@@ -137,11 +137,15 @@ instead of the two we could afford to embed.
 - **It acts where regions are *now*.** Before running, every target is
   re-located against a fresh capture; a region that moved yields
   corrected coordinates, so a session captured last month still works.
-- **It refuses rather than guesses.** A region that can't be found
-  unambiguously stops the run before anything is injected. Ambiguity is
+- **It refuses rather than guesses.** Every region is re-confirmed
+  immediately *before* the step that touches it, and a region that can't
+  be found unambiguously stops the run with nothing injected. Ambiguity is
   the test, not distance: a match found in one place is that region
-  however far it moved, which is what lets a flow survive a scrolled
-  page.
+  however far it moved, which is what lets a flow survive a scrolled page.
+- **It checks before acting, not after.** Acting on something changes it —
+  a focused field grows a caret — so "the region still matches" after a
+  click would mean the click did nothing. Outcomes are asserted by naming
+  what should have changed.
 - **It distinguishes "executed" from "verified".** The OS accepting an
   event is not the app reacting to one, and the report says which
   happened.

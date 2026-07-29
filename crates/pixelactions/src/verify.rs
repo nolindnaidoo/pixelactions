@@ -21,7 +21,6 @@ use serde::Deserialize;
 /// without breaking us.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FindReport {
-    pub all_relocated: bool,
     pub results: Vec<FindResult>,
 }
 

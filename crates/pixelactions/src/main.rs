@@ -131,6 +131,8 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
             session: &session_path,
             monitors: &session.monitors,
             corrections: &corrections,
+            // Preflight just swept every region this run will act on.
+            checked: flow.settings.relocate,
         },
         &mut verifier,
     );

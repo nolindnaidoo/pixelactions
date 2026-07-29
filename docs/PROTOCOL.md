@@ -85,11 +85,12 @@ Exactly one response per request, tagged by `result`.
 {"id":6,"result":"error","detail":"no selection labeled \"nope\" in this session — it has: …"}
 ```
 
-`outcome` uses the run report's vocabulary: **`verified`** (it ran and a
-fresh capture confirmed it), **`executed`** (it ran; verification was not
-asked for), **`failed`** (it ran and did not work — `detail` says why),
-**`refused`** (a guard declined before anything was attempted — today,
-the kill switch).
+`outcome` uses the run report's vocabulary: **`verified`** (an
+observation step's condition held), **`executed`** (input was posted —
+acting steps always report this, since a click cannot confirm its own
+outcome), **`failed`** (it ran and did not work — `detail` says why),
+**`refused`** (a guard declined before anything was attempted: the kill
+switch, or a region that could not be confirmed).
 
 **`done` vs `error` is the same line the exit codes draw between 1 and
 2.** A step that ran and failed honestly is a `done` with

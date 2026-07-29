@@ -22,7 +22,9 @@
 //!   impossible.
 //! - **A missing region only blocks the steps that name it.** A flow's
 //!   targets are exactly what it will touch, so `run` can refuse whole;
-//!   a session may describe ten regions a given bot never visits.
+//!   a session may describe ten regions a given bot never visits. The run
+//!   loop's per-step check already works this way, so nothing extra is
+//!   needed here.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -56,7 +58,6 @@ struct Server<'a> {
     /// Labels the last relocation pass could not confirm. Acting on one
     /// would be acting blind, so steps naming them are refused.
     missing: Vec<String>,
-    relocated: bool,
     greeted: bool,
     injector: &'a mut dyn Injector,
 }
@@ -86,7 +87,6 @@ pub fn run(session_directory: &Path) -> Result<i32> {
         settings: Settings::default(),
         corrections: Corrections::new(),
         missing: Vec::new(),
-        relocated: false,
         greeted: false,
         injector: injector.as_mut(),
     };
@@ -171,14 +171,12 @@ impl Server<'_> {
     }
 
     /// Perform one step, through the same path a flow file takes.
+    ///
+    /// The run loop checks each acting step's regions immediately before it
+    /// acts, which is exactly what a serve session needs — every request
+    /// arrives against a screen that may have moved since the last one — so
+    /// there is nothing to relocate here.
     fn step(&mut self, step: Step) -> ResponseBody {
-        let targets: Vec<String> = step.targets().iter().map(|t| (*t).to_string()).collect();
-        if step.injects()
-            && let Err(detail) = self.ensure_relocated(&targets)
-        {
-            return ResponseBody::Error { detail };
-        }
-
         let flow = Flow {
             session: self.session_path.display().to_string(),
             settings: self.settings.clone(),
@@ -202,6 +200,10 @@ impl Server<'_> {
                 session: &self.session_path,
                 monitors: &self.session.monitors,
                 corrections: &self.corrections,
+                // A serve session has no preflight: each request arrives
+                // against a screen that may have changed since the last
+                // one, so every acting step checks for itself.
+                checked: false,
             },
             &mut verifier,
         );
@@ -259,7 +261,6 @@ impl Server<'_> {
             &self.session.monitors,
             self.settings.space,
         );
-        self.relocated = true;
 
         let moved = references
             .iter()
@@ -272,31 +273,6 @@ impl Server<'_> {
             .map(|label| (*label).to_string())
             .collect();
         Ok(moved)
-    }
-
-    /// Relocate once before the first acting step, then refuse only the
-    /// steps whose own regions are unaccounted for.
-    fn ensure_relocated(&mut self, targets: &[String]) -> Result<(), String> {
-        if !self.settings.relocate {
-            return Ok(());
-        }
-        if !self.relocated {
-            self.relocate()?;
-        }
-        let blocked: Vec<&str> = targets
-            .iter()
-            .filter(|target| self.missing.iter().any(|m| m.eq_ignore_ascii_case(target)))
-            .map(String::as_str)
-            .collect();
-        if blocked.is_empty() {
-            return Ok(());
-        }
-        Err(format!(
-            "the screen no longer matches the session for {}: wait for it with \
-             {{\"do\":\"wait_for\",\"target\":\"...\"}}, or send {{\"do\":\"relocate\"}} \
-             once the UI has settled",
-            blocked.join(", ")
-        ))
     }
 }
 

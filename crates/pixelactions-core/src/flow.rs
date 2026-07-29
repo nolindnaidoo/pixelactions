@@ -14,17 +14,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::convert::Space;
 
-/// How thoroughly a run verifies itself.
+/// Whether a run re-confirms a region before acting on it.
+///
+/// This is a **precondition**, not a report card. "Is the region I am
+/// about to touch present and unambiguous?" has a stable answer; "did it
+/// survive being touched?" does not, because acting on something changes
+/// it. To assert an outcome, name what should have changed — `wait_for`,
+/// `wait_gone`, or a `verify` step on another region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Verify {
-    /// Confirm every acted-on region after its step.
+    /// Re-confirm each region immediately before the step that touches it,
+    /// and act on where it is found. Keeps coordinates correct as the UI
+    /// reflows mid-run, at the cost of one capture per acting step.
     #[default]
     Each,
-    /// Confirm once, after the last step.
-    End,
-    /// Do not verify. The run reports success only in the sense that
-    /// nothing errored — say so in the report.
+    /// Act on the coordinates already known. Faster, and appropriate when
+    /// the run asserts its own outcomes with `wait_for` / `verify`.
     None,
 }
 

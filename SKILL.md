@@ -98,9 +98,13 @@ corrections included), the outcome, timing, and any failure detail.
 
 `outcome` has three values and the difference matters:
 
-- `verified` — it ran and a fresh capture confirmed it
-- `executed` — it ran; verification was not requested. **This is not
-  proof it worked.** The OS accepts an event long before an app reacts.
+- `verified` — an observation step held: `verify:`, `wait:`, or `gone:`.
+  Only these assert anything about the screen.
+- `executed` — the input was posted. **This is not proof it worked.** The
+  OS accepts an event long before an app reacts, and acting steps always
+  report this — a click cannot confirm its own outcome, because clicking
+  something changes it. To know an action worked, `wait:` for what it was
+  supposed to produce.
 - `failed` — it ran and did not work; `detail` says why
 - `refused` — a guard declined before anything was attempted. Never
   retry this one; read `detail` and stop.

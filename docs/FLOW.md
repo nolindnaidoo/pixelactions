@@ -99,9 +99,24 @@ and a flow file has none by design. That is a job for
   each region is *now*. Regions that moved yield corrected coordinates;
   regions that cannot be found unambiguously stop the run before
   anything is injected.
-- **`verify`** — `each` confirms after every step that touched a region,
-  `end` only at the finish, `none` not at all. A `verify` step always
-  checks regardless.
+- **`verify`** — when to re-confirm a region. `each` (default) checks
+  immediately **before** each step that touches a region, and acts on
+  where it is found; `none` acts on the coordinates already known. A
+  `verify` step always checks regardless.
+
+  The check is a **precondition**, deliberately. "Is the thing I am about
+  to click present and unambiguous?" has a stable answer. "Did it survive
+  being clicked?" does not — focusing a field adds a caret and a
+  highlight, so checking a region *after* acting on it reports failure
+  exactly when the action worked, and reports success when a click was
+  swallowed and the region sat untouched.
+
+  Checking before each step also keeps coordinates honest as the page
+  moves: a step that reveals a banner shifts everything below it, and the
+  next step follows the region rather than clicking where it used to be.
+
+  **To assert an outcome, name what should have changed** — `wait_for`
+  what appears, `wait_gone` what disappears, `verify` another region.
 - **`space`** — `auto` means what this platform's input API expects:
   logical points on macOS, physical pixels on Windows and X11. Override
   only if you know why.
