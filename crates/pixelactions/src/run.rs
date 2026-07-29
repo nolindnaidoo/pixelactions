@@ -157,18 +157,35 @@ fn poll_until(
     want_present: bool,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
-    let deadline = Instant::now() + Duration::from_millis(flow.settings.timeout_ms);
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(flow.settings.timeout_ms);
     let interval = Duration::from_millis(flow.settings.poll_ms.max(1));
+    let mut polls = 0_u32;
+    let mut best = 0.0_f64;
+    let mut last_look = "the report never mentioned it".to_string();
     loop {
         let report = verifier(session, Some(target))?;
+        polls += 1;
+        if let Some(result) = report.result_for(target) {
+            best = best.max(result.score);
+            last_look = describe(result);
+        }
         if report.is_confirmed(target) == want_present {
             return Ok(StepOutcome::Verified);
         }
         if Instant::now() >= deadline {
+            // A timeout without evidence is the complaint that fills
+            // pyautogui's issue tracker: "not found" tells you nothing
+            // about whether you were one pixel off or looking at the
+            // wrong screen. The last look matters as much as the score —
+            // a region that matched *perfectly in three places* is a
+            // different problem from one that never appeared, and the
+            // score alone cannot tell them apart.
             let wanted = if want_present { "appear" } else { "disappear" };
             bail!(
-                "timed out after {}ms waiting for {target:?} to {wanted}",
-                flow.settings.timeout_ms
+                "timed out after {}ms waiting for {target:?} to {wanted} \
+                 ({polls} polls, best match score {best:.3}) — last look: {last_look}",
+                started.elapsed().as_millis()
             );
         }
         std::thread::sleep(interval);
@@ -211,9 +228,10 @@ fn describe(result: &verify::FindResult) -> String {
         return format!("matched in more than one place, score {:.3}", result.score);
     }
     if !result.found {
-        return result.reason.clone().unwrap_or_else(|| {
-            format!("no match above the floor, best score {:.3}", result.score)
-        });
+        let Some(reason) = result.reason.clone() else {
+            return format!("no match above the floor, best score {:.3}", result.score);
+        };
+        return format!("{reason} (score {:.3})", result.score);
     }
     match result.delta {
         Some(delta) if delta.dx != 0 || delta.dy != 0 => {
@@ -501,12 +519,13 @@ fn confirm(
         return Ok(StepOutcome::Verified);
     }
     let _ = report.all_relocated;
-    let detail = report
-        .result_for(target)
-        .and_then(|r| r.reason.clone())
-        .unwrap_or_else(|| {
-            format!("region {target:?} did not match its saved crop after the step")
-        });
+    // Through the same description preflight uses, so a region that
+    // matched in three places is never reported as "did not match" —
+    // which is both false and the opposite of the fix.
+    let detail = report.result_for(target).map_or_else(
+        || format!("region {target:?} was not in the report after the step"),
+        |result| format!("region {target:?}: {}", describe(result)),
+    );
     bail!(detail)
 }
 
@@ -1053,6 +1072,81 @@ mod tests {
             &mut appears_after(3),
         );
         assert_eq!(report.steps[0].outcome, StepOutcome::Verified);
+    }
+
+    #[test]
+    fn a_timeout_reports_how_hard_it_looked() {
+        // "Not found" without evidence is the complaint that fills
+        // pyautogui's issue tracker.
+        let mut flow = flow_with(Verify::Each);
+        flow.settings.timeout_ms = 30;
+        flow.settings.poll_ms = 10;
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::WaitFor {
+                    target: "dialog".into(),
+                },
+                vec![point(10.0, 10.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut never_found(),
+        );
+        let detail = report.steps[0].detail.clone().expect("explained");
+        assert!(detail.contains("polls"), "says how many times: {detail}");
+        assert!(
+            detail.contains("best match score"),
+            "says how close: {detail}"
+        );
+        assert!(detail.contains("last look"), "says what it saw: {detail}");
+    }
+
+    #[test]
+    fn an_ambiguous_match_is_never_reported_as_not_matching() {
+        // A crop that matches perfectly in three places is refused — but
+        // calling that "did not match its saved crop" is false, and
+        // sends the reader looking for the wrong problem entirely.
+        let mut ambiguous = |_: &Path, label: Option<&str>| {
+            Ok(serde_json::from_str(&format!(
+                r#"{{"all_relocated":false,"results":[{{"label":"{}","found":true,"ambiguous":true,"score":1.0}}]}}"#,
+                label.unwrap_or("x")
+            ))
+            .expect("fixture"))
+        };
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Verify {
+                    target: "profile".into(),
+                },
+                vec![point(10.0, 10.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow_with(Verify::Each),
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+            },
+            &mut ambiguous,
+        );
+        let detail = report.steps[0].detail.clone().expect("explained");
+        assert!(
+            detail.contains("more than one place"),
+            "names the real problem: {detail}"
+        );
     }
 
     #[test]
