@@ -4,11 +4,16 @@ use clap::{Parser, Subcommand};
 
 const EXAMPLES: &str = "\
 Examples:
-  pixelactions plan flow.toml            resolve every step, act on nothing
-  pixelactions run flow.toml --yes       perform it, verifying each step
+  pixelactions run --session DIR click:submit type:\"hi\" key:cmd+s wait:done --yes
+  pixelactions plan --flow flow.toml     resolve every step, act on nothing
+  pixelactions run --flow flow.toml --yes
   pixelactions doctor --probe            prove input permission, harmlessly
 
-A flow references a pixelcoords session by label, never by coordinate.
+Verbs: click double verify wait gone type key drag:FROM>TO pause:MS
+They mirror the flow file's actions one-for-one, so learning either
+teaches the other.
+
+Actions reference a pixelcoords session by label, never by coordinate.
 Exit codes: 0 done, 1 a step failed honestly, 2 malformed question,
 3 refused (permission missing, unsupported platform).";
 
@@ -26,8 +31,15 @@ pub enum Command {
     /// every coordinate, after conversion, with the monitor it landed on.
     /// Touches nothing.
     Plan {
-        /// Path to the flow file
-        flow: PathBuf,
+        /// Path to a flow file. Omit when passing chained verbs.
+        #[arg(long, conflicts_with = "session")]
+        flow: Option<PathBuf>,
+        /// Session directory, for chained verbs
+        #[arg(long, value_name = "DIR")]
+        session: Option<PathBuf>,
+        /// Chained actions to resolve
+        #[arg(value_name = "VERB:ARG")]
+        verbs: Vec<String>,
         /// Machine-readable plan on stdout instead of the human one
         #[arg(long)]
         json: bool,
@@ -36,11 +48,19 @@ pub enum Command {
         #[arg(long, value_enum)]
         space: Option<SpaceArg>,
     },
-    /// Perform a flow: act at each resolved point and confirm it landed.
-    /// Requires --yes; without it, prints what it would do and refuses.
+    /// Perform actions: either a flow file, or verbs chained on the
+    /// command line. Requires --yes; without it, prints what it would do
+    /// and refuses.
     Run {
-        /// Path to the flow file
-        flow: PathBuf,
+        /// Path to a flow file. Omit when passing chained verbs.
+        #[arg(long, conflicts_with = "session")]
+        flow: Option<PathBuf>,
+        /// Session directory, for chained verbs (a flow file names its own)
+        #[arg(long, value_name = "DIR")]
+        session: Option<PathBuf>,
+        /// Chained actions: click:submit type:"hello" key:cmd+s wait:done
+        #[arg(value_name = "VERB:ARG")]
+        verbs: Vec<String>,
         /// Machine-readable run report on stdout instead of the human one
         #[arg(long)]
         json: bool,

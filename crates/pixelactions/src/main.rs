@@ -28,8 +28,36 @@ const EXIT_REFUSED: i32 = 3;
 fn main() {
     let cli = cli::Cli::parse();
     let result = match cli.command {
-        cli::Command::Plan { flow, json, space } => run_plan(&flow, json, space.map(Into::into)),
-        cli::Command::Run { flow, json, yes } => run_flow(&flow, json, yes),
+        cli::Command::Plan {
+            flow,
+            session,
+            verbs,
+            json,
+            space,
+        } => run_plan(
+            &Source {
+                flow,
+                session,
+                verbs,
+            },
+            json,
+            space.map(Into::into),
+        ),
+        cli::Command::Run {
+            flow,
+            session,
+            verbs,
+            json,
+            yes,
+        } => run_flow(
+            &Source {
+                flow,
+                session,
+                verbs,
+            },
+            json,
+            yes,
+        ),
         cli::Command::Doctor { json, probe } => doctor::run(json, probe),
     };
     match result {
@@ -43,14 +71,14 @@ fn main() {
 
 /// Perform a flow. Returns the process exit code rather than exiting, so
 /// the run report is always printed first.
-fn run_flow(flow_path: &std::path::Path, json: bool, yes: bool) -> Result<i32> {
+fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
     if !cfg!(target_os = "macos") {
         eprintln!(
             "pixelactions: input synthesis is macOS-only in this build —              `plan` works everywhere"
         );
         return Ok(EXIT_REFUSED);
     }
-    let (flow, session_path, session) = load_flow(flow_path)?;
+    let (flow, session_path, session) = load_flow(source)?;
     let space = flow.settings.space;
     let resolved = plan(&flow, &session, space)?;
 
@@ -60,8 +88,7 @@ fn run_flow(flow_path: &std::path::Path, json: bool, yes: bool) -> Result<i32> {
             resolved.steps.len()
         );
         eprintln!(
-            "run `pixelactions plan {}` first to see every coordinate, then pass --yes.",
-            flow_path.display()
+            "run the same arguments with `plan` first to see every coordinate, then pass --yes."
         );
         return Ok(EXIT_REFUSED);
     }
@@ -147,25 +174,57 @@ fn print_report(report: &pixelactions_core::report::RunReport) {
     }
 }
 
+/// Where a run's steps came from: a flow file, or verbs chained on the
+/// command line. Both produce the same `Flow`, so everything downstream
+/// — resolution, relocation, bounds, verification — is identical, and
+/// learning one surface teaches the other.
+pub struct Source {
+    pub flow: Option<std::path::PathBuf>,
+    pub session: Option<std::path::PathBuf>,
+    pub verbs: Vec<String>,
+}
+
 /// Read a flow and its session together — the pairing every command needs.
 fn load_flow(
-    flow_path: &std::path::Path,
+    source: &Source,
 ) -> Result<(
     Flow,
     std::path::PathBuf,
     pixelcoords_core::session::SessionFile,
 )> {
-    let source = std::fs::read_to_string(flow_path)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", flow_path.display()))?;
-    let flow = Flow::parse(&source)?;
+    let flow = build_flow(source)?;
     let session_path = expand_home(&flow.session);
     let session = session::load(&session_path)?;
     Ok((flow, session_path, session))
 }
 
+fn build_flow(source: &Source) -> Result<Flow> {
+    if let Some(path) = &source.flow {
+        if !source.verbs.is_empty() {
+            anyhow::bail!(
+                "pass a flow file or chained verbs, not both — the flow already lists its steps"
+            );
+        }
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
+        return Ok(Flow::parse(&text)?);
+    }
+    let Some(directory) = &source.session else {
+        anyhow::bail!("need either --flow FILE or --session DIR with chained verbs");
+    };
+    if source.verbs.is_empty() {
+        anyhow::bail!("nothing to do — pass verbs like click:submit, or --flow with a file");
+    }
+    Ok(Flow {
+        session: directory.display().to_string(),
+        settings: pixelactions_core::flow::Settings::default(),
+        steps: pixelactions_core::verb::parse_all(&source.verbs)?,
+    })
+}
+
 /// Resolve every step and print the result. Acts on nothing.
-fn run_plan(flow_path: &std::path::Path, json: bool, space: Option<Space>) -> Result<i32> {
-    let (flow, session_path, session) = load_flow(flow_path)?;
+fn run_plan(source: &Source, json: bool, space: Option<Space>) -> Result<i32> {
+    let (flow, session_path, session) = load_flow(source)?;
     let space = space.unwrap_or(flow.settings.space);
     let resolved = plan(&flow, &session, space)?;
 
