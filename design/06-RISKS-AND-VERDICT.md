@@ -2,7 +2,8 @@
 
 ## Is the idea legitimate?
 
-**Yes — with a narrower claim than "universal."** The research found no
+**Yes. The value stands on macOS + Windows + X11 alone; Wayland is
+upside, not foundation.** The research found no
 maintained, cross-platform, single-binary CLI that executes desktop
 input from declarative files with verification. The nearest neighbors
 are each missing a leg:
@@ -28,12 +29,14 @@ unoccupied.
 
 ## The four real risks
 
-1. **Substrate pain, not competition.** Wayland absolute placement needs
-   portal consent + a linked screencast stream; macOS needs Accessibility
-   and can't ship sandboxed; Windows can't touch elevated apps. This is
-   months of per-platform engineering and the reason the gap exists.
-   *Mitigation: spike Wayland first (see architecture). If it can't be
-   made honest, narrow the claim before writing product code.*
+1. **Substrate pain, not competition.** macOS needs an Accessibility
+   grant and can't ship sandboxed; Windows can't touch elevated apps;
+   Wayland needs portal consent plus a screencast-linked stream for
+   absolute motion. This is real per-platform engineering and it is the
+   reason the gap exists — barriers to entry cut both ways.
+   *Mitigation: ship the three platforms that carry today's demand
+   first, then climb the Wayland ladder. Precedent: pixelcoords' own
+   Wayland capture looked impossible until the portal path worked.*
 2. **The a11y-first tide.** Both credible new entrants chose
    accessibility trees *for* determinism; UiPath and Power Automate
    treat vision as fallback. Coordinates+templates must be positioned as
@@ -64,13 +67,34 @@ click verification as a named missing primitive. An executor that acts
 only on human-verified ground truth and verifies after every step is the
 guardrail that literature is asking for.
 
-## What would make me abandon it
+## Why Wayland is not the load-bearing question
 
-Stated now, while it's cheap to be objective:
+Every demand signal the research found runs on non-Wayland substrates
+today:
 
-- If the Wayland spike shows absolute placement can't be made reliable
-  across GNOME + KDE + wlroots, the "universal" thesis is dead. A
-  Windows/mac/X11 tool is still useful but competes with a crowded
-  field on much weaker grounds — reconsider then.
-- If a maintained cross-platform equivalent ships first, the honest
-  move is to contribute rather than duplicate.
+- **PyAutoGUI** — the incumbent the whole market actually uses — is
+  Win/mac/X11 with zero Wayland, and unmaintained besides. The gap it
+  leaves is on the platforms it already covers.
+- **Anthropic's computer-use reference** shells out to **xdotool in a
+  Docker container** — X11.
+- **OSWorld** standardized the research agent action space on
+  **pyautogui** — Win/mac/X11.
+- **terminator** raised **$2.8M being Windows-only.**
+- **CI rigs, kiosks, Citrix/VDI, desktop QA** — overwhelmingly Windows
+  and X11.
+
+A tool covering macOS + Windows + X11, with human-verified ground truth
+and assert-gated execution, is already better than anything shipping.
+Wayland then makes it the *only* option for a growing default-Wayland
+Linux desktop — a differentiator to earn, not a gate to pass.
+
+## What would actually make me abandon it
+
+- If **all three** Wayland paths fail AND the mac/Windows/X11
+  injection layer proves unreliable in practice — i.e. the core
+  promise (exact placement, verified) can't be kept anywhere.
+- If a maintained cross-platform equivalent with verification ships
+  first, the honest move is to contribute rather than duplicate.
+
+Not on the list: Wayland alone. A three-platform tool that keeps its
+promises beats a four-platform tool that doesn't exist.

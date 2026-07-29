@@ -106,13 +106,23 @@ on any platform. What we will state up front, in `doctor` and the README:
 
 ## PROVE FIRST (spikes, in order)
 
-1. **Wayland absolute placement end-to-end** on GNOME *and* KDE: portal
-   → EIS → screencast-linked absolute click at a known pixel, verified
-   by screenshot. If this can't be made reliable, the "universal" claim
-   dies and the project is X11+mac+Windows — decide before building.
+Ordered by what carries today's demand, not by what's hardest.
+
+1. **The loop**: `find → act → assert` against a real app whose UI moved
+   between capture and run. This is the whole differentiator; prove it
+   on the dev machine before anything else.
 2. **macOS coordinate conversion** on a mixed Retina/non-Retina
    multi-monitor rig, including a scaled HiDPI mode.
 3. **Windows multi-monitor normalization** with the `−1` off-by-one and
    a negative-origin secondary display.
-4. **The loop**: `find → act → assert` against a real app whose UI
-   moved between capture and run.
+4. **X11** — straightforward (physical px, XTEST), and it's the
+   substrate agent stacks actually run on today (xdotool in containers).
+5. **Wayland ladder**, climbed after the tool is real: portal + EIS +
+   screencast-linked absolute on GNOME and KDE →
+   `zwlr_virtual_pointer_v1` on wlroots → uinput for
+   relative/keyboard-only with absolute honestly refused.
+
+Wayland is a differentiator to earn, not a gate to pass. pixelcoords'
+own Wayland capture looked impossible until the portal path worked; the
+same patience applies here, and shipping three platforms first is what
+funds that patience with real users.

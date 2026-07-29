@@ -27,6 +27,8 @@ with codes a machine can read.
 
 ## Next step
 
-Spike #1 in [03-ARCHITECTURE.md](03-ARCHITECTURE.md): Wayland absolute
-placement end-to-end on GNOME and KDE. It's the load-bearing unknown —
-everything else is engineering we know how to do.
+Spike #1 in [03-ARCHITECTURE.md](03-ARCHITECTURE.md): the
+`find → act → assert` loop on this machine, against an app whose UI
+moved between capture and run. That's the differentiator; the platform
+matrix is engineering we know how to do, and Wayland is upside earned
+after the tool is real.
