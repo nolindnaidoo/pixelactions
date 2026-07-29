@@ -9,11 +9,11 @@
   <a href="https://github.com/nolindnaidoo/pixelactions/actions/workflows/ci.yml">
     <img src="https://github.com/nolindnaidoo/pixelactions/actions/workflows/ci.yml/badge.svg" alt="Build Status" />
   </a>
-  <a href="https://crates.io/crates/pixelactions">
-    <img src="https://img.shields.io/crates/v/pixelactions.svg" alt="crates.io" />
-  </a>
   <a href="https://docs.rs/pixelactions-core">
     <img src="https://img.shields.io/docsrs/pixelactions-core.svg" alt="docs.rs" />
+  </a>
+  <a href="https://crates.io/crates/pixelactions">
+    <img src="https://img.shields.io/crates/v/pixelactions.svg" alt="crates.io" />
   </a>
   <img src="https://img.shields.io/badge/rustc-1.88+-93450a.svg" alt="MSRV: Rust 1.88+" />
   <a href="https://github.com/nolindnaidoo/pixelactions/blob/main/LICENSE">
