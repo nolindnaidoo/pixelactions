@@ -1,0 +1,13 @@
+# A flow against the session captured while recording the pixelcoords demo.
+session = "/Users/dev/Downloads/pixelcoords-captures/20260728-182121-117"
+
+[settings]
+space = "auto"
+
+[[step]]
+action = "click"
+target = ""
+
+[[step]]
+action = "type"
+text = "pixelactions"

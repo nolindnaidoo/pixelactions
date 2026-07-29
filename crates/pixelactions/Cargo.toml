@@ -1,0 +1,23 @@
+[package]
+name = "pixelactions"
+description = "Execute desktop interactions from pixelcoords sessions: resolve a labeled region, act at the verified point, confirm it landed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+pixelactions-core = { path = "../pixelactions-core", version = "0.1.0" }
+pixelcoords-core = "0.1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

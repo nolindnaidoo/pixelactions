@@ -1,0 +1,31 @@
+[package]
+name = "pixelactions-core"
+description = "Platform-free core for pixelactions: flow schema, plan resolution, coordinate-space conversion, run reports"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# The session schema, from the sister tool's published crate — a caret
+# range, never a path dependency, so pixelcoords evolves on its own
+# schedule and this crate upgrades deliberately. See AGENTS.md.
+pixelcoords-core = "0.1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "1"
+
+[dev-dependencies]
+# The conversion math holds invariants for every input (a point converted
+# and converted back is the same point; a point inside a monitor stays
+# inside it), which example tests only ever check for examples.
+proptest = "1"
+serde_json = "1"
+
+[lints]
+workspace = true
