@@ -18,6 +18,10 @@
   </a>
 </p>
 
+<p align="center">
+  <img src="https://github.com/nolindnaidoo/pixelactions/raw/main/docs/assets/demo.gif" alt="pixelactions demo: a chained command clicks a field, types an address, submits, and waits until the confirmation appears — reporting each step as it lands" style="max-width: 100%; height: auto;" />
+</p>
+
 [pixelcoords](https://github.com/nolindnaidoo/pixelcoords) freezes your
 screen, lets you mark labeled regions, and writes pixel-exact
 coordinates with crops, drift re-location, and point verification.
