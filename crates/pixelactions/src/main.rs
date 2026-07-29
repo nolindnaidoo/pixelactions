@@ -296,9 +296,13 @@ mod tests {
     fn home_expansion_handles_the_common_shapes() {
         // SAFETY-free: this only reads the variable it just set.
         unsafe { std::env::set_var("HOME", "/home/tester") };
+        // Built with `join` rather than spelled out, because the
+        // separator it inserts is the platform's own — a literal
+        // "/home/tester/captures/x" passes on Unix and fails on Windows,
+        // where the correct answer contains a backslash.
         assert_eq!(
-            expand_home("~/captures/x").to_str(),
-            Some("/home/tester/captures/x")
+            expand_home("~/captures/x"),
+            std::path::PathBuf::from("/home/tester").join("captures/x")
         );
         assert_eq!(
             expand_home("/absolute/path").to_str(),
