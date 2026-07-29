@@ -61,7 +61,7 @@ fn pixelcoords_status() -> PixelcoordsStatus {
     }
 }
 
-pub fn run(json: bool) -> Result<()> {
+pub fn run(json: bool) -> Result<i32> {
     let report = Report {
         schema: 1,
         platform: std::env::consts::OS,
@@ -71,14 +71,14 @@ pub fn run(json: bool) -> Result<()> {
         pixelcoords: pixelcoords_status(),
         capabilities: Capabilities {
             resolve: true,
-            inject: false,
-            verify: false,
+            inject: cfg!(target_os = "macos"),
+            verify: true,
         },
     };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
+        return Ok(0);
     }
 
     println!("platform:        {}", report.platform);
@@ -105,7 +105,14 @@ pub fn run(json: bool) -> Result<()> {
     println!();
     println!("capabilities:");
     println!("  resolve a plan   yes");
-    println!("  inject input     no  — next milestone");
-    println!("  verify a step    no  — needs pixelcoords find");
-    Ok(())
+    println!(
+        "  inject input     {}",
+        if report.capabilities.inject {
+            "yes — needs macOS Accessibility permission"
+        } else {
+            "no  — macOS only in this build"
+        }
+    );
+    println!("  verify a step    yes — via pixelcoords find");
+    Ok(0)
 }

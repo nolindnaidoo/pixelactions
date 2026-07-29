@@ -1,12 +1,16 @@
 //! pixelactions — execute desktop interactions from pixelcoords sessions.
 //!
-//! This build resolves and reports; it does not yet inject input. That
-//! order is deliberate: a wrong coordinate is a click in the wrong place,
-//! so the resolution has to be provably right before anything moves.
+//! `plan` resolves and reports without touching anything; `run` performs
+//! the flow and confirms each step against a fresh capture. Dry-run is
+//! permanent, not a phase — a wrong coordinate is a click in the wrong
+//! place, and seeing the numbers first is how that gets caught.
 
 mod cli;
 mod doctor;
+mod inject;
+mod run;
 mod session;
+mod verify;
 
 use anyhow::Result;
 use clap::Parser;
@@ -17,27 +21,130 @@ use pixelactions_core::plan::{Plan, plan};
 /// Exit codes are the API (same contract as the sister tool, plus 3):
 /// 0 done · 1 a step failed honestly · 2 malformed question · 3 refused.
 const EXIT_MALFORMED: i32 = 2;
+const EXIT_REFUSED: i32 = 3;
 
 fn main() {
     let cli = cli::Cli::parse();
     let result = match cli.command {
         cli::Command::Plan { flow, json, space } => run_plan(&flow, json, space.map(Into::into)),
+        cli::Command::Run { flow, json, yes } => run_flow(&flow, json, yes),
         cli::Command::Doctor { json } => doctor::run(json),
     };
-    if let Err(error) = result {
-        eprintln!("pixelactions: {error:#}");
-        std::process::exit(EXIT_MALFORMED);
+    match result {
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("pixelactions: {error:#}");
+            std::process::exit(EXIT_MALFORMED);
+        }
     }
 }
 
-/// Resolve every step and print the result. Acts on nothing.
-fn run_plan(flow_path: &std::path::Path, json: bool, space: Option<Space>) -> Result<()> {
+/// Perform a flow. Returns the process exit code rather than exiting, so
+/// the run report is always printed first.
+fn run_flow(flow_path: &std::path::Path, json: bool, yes: bool) -> Result<i32> {
+    if !cfg!(target_os = "macos") {
+        eprintln!(
+            "pixelactions: input synthesis is macOS-only in this build —              `plan` works everywhere"
+        );
+        return Ok(EXIT_REFUSED);
+    }
+    let (flow, session_path, session) = load_flow(flow_path)?;
+    let space = flow.settings.space;
+    let resolved = plan(&flow, &session, space)?;
+
+    if !yes {
+        eprintln!(
+            "about to perform {} steps — this moves your mouse and keyboard.",
+            resolved.steps.len()
+        );
+        eprintln!(
+            "run `pixelactions plan {}` first to see every coordinate, then pass --yes.",
+            flow_path.display()
+        );
+        return Ok(EXIT_REFUSED);
+    }
+
+    let mut verifier =
+        |session: &std::path::Path, label: Option<&str>| verify::find(session, label);
+
+    // Refuse before acting when the screen has drifted from the capture:
+    // clicking coordinates whose regions have moved is vandalism, not
+    // automation.
+    if let Err(refusal) = run::preflight(&flow, &session_path, &mut verifier) {
+        eprintln!("pixelactions: {refusal:#}");
+        return Ok(EXIT_REFUSED);
+    }
+
+    let mut injector = make_injector()?;
+    let report = run::execute(
+        injector.as_mut(),
+        &flow,
+        &resolved,
+        &session_path,
+        &mut verifier,
+    );
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_report(&report);
+    }
+    Ok(report.exit_code())
+}
+
+#[cfg(target_os = "macos")]
+fn make_injector() -> Result<Box<dyn inject::Injector>> {
+    Ok(Box::new(inject::RealInjector::new()?))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn make_injector() -> Result<Box<dyn inject::Injector>> {
+    anyhow::bail!("input synthesis is not implemented for this platform yet")
+}
+
+fn print_report(report: &pixelactions_core::report::RunReport) {
+    use pixelactions_core::report::StepOutcome;
+    println!("session: {}", report.session);
+    println!();
+    for step in &report.steps {
+        let mark = match step.outcome {
+            StepOutcome::Verified => "verified",
+            StepOutcome::Executed => "executed",
+            StepOutcome::Skipped => "skipped ",
+            StepOutcome::Failed => "FAILED  ",
+        };
+        println!(
+            "  {} {:>2}. {} ({} ms)",
+            mark,
+            step.index + 1,
+            step.summary,
+            step.elapsed_ms
+        );
+        if let Some(detail) = &step.detail {
+            println!("            {detail}");
+        }
+    }
+}
+
+/// Read a flow and its session together — the pairing every command needs.
+fn load_flow(
+    flow_path: &std::path::Path,
+) -> Result<(
+    Flow,
+    std::path::PathBuf,
+    pixelcoords_core::session::SessionFile,
+)> {
     let source = std::fs::read_to_string(flow_path)
         .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", flow_path.display()))?;
     let flow = Flow::parse(&source)?;
-
     let session_path = expand_home(&flow.session);
     let session = session::load(&session_path)?;
+    Ok((flow, session_path, session))
+}
+
+/// Resolve every step and print the result. Acts on nothing.
+fn run_plan(flow_path: &std::path::Path, json: bool, space: Option<Space>) -> Result<i32> {
+    let (flow, session_path, session) = load_flow(flow_path)?;
     let space = space.unwrap_or(flow.settings.space);
     let resolved = plan(&flow, &session, space)?;
 
@@ -46,10 +153,10 @@ fn run_plan(flow_path: &std::path::Path, json: bool, space: Option<Space>) -> Re
             "{}",
             serde_json::to_string_pretty(&as_json(&flow, &resolved))?
         );
-        return Ok(());
+        return Ok(0);
     }
     print_human(&flow, &resolved, &session_path);
-    Ok(())
+    Ok(0)
 }
 
 fn print_human(flow: &Flow, resolved: &Plan, session_path: &std::path::Path) {

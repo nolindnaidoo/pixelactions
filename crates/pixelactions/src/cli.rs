@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 const EXAMPLES: &str = "\
 Examples:
   pixelactions plan flow.toml            resolve every step, act on nothing
-  pixelactions plan flow.toml --json     the same, machine-readable
+  pixelactions run flow.toml --yes       perform it, verifying each step
   pixelactions doctor                    permissions, displays, sister tool
 
 A flow references a pixelcoords session by label, never by coordinate.
@@ -35,6 +35,18 @@ pub enum Command {
         /// setting, normally `auto` = what this platform's input API wants)
         #[arg(long, value_enum)]
         space: Option<SpaceArg>,
+    },
+    /// Perform a flow: act at each resolved point and confirm it landed.
+    /// Requires --yes; without it, prints what it would do and refuses.
+    Run {
+        /// Path to the flow file
+        flow: PathBuf,
+        /// Machine-readable run report on stdout instead of the human one
+        #[arg(long)]
+        json: bool,
+        /// Actually perform the flow. Without this, nothing is injected.
+        #[arg(long)]
+        yes: bool,
     },
     /// Check what pixelactions needs to run: OS support, input
     /// permission, displays, and the pixelcoords binary it calls.
