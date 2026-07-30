@@ -190,10 +190,10 @@ declared stable.
 - The release cut: one PR bumps the workspace version and the core dep
   pin. Then tag `v<X.Y.Z>` — the tag triggers
   `.github/workflows/release.yml`, which builds macOS binaries (arm64 +
-  x86_64) and opens a **draft** GitHub release with the archives
-  attached. Other platforms are added to that matrix when injection
-  actually works on them; shipping a binary that refuses to inject would
-  imply support this build does not have.
+  x86_64) and a Linux x86_64 binary, then opens a **draft** GitHub release
+  with the archives attached. Other platforms are added to that matrix
+  when injection actually works on them; shipping a binary that refuses to
+  inject would imply support this build does not have.
 - crates.io publish order matters: `cargo publish -p pixelactions-core`
   first, then `-p pixelactions` (the binary's dep pin must resolve).
   Publishes are manual and deliberate; nothing in CI publishes.

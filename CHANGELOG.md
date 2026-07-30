@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-07-30
 
 **Linux/Wayland**, through the sanctioned path: xdg-desktop-portal
 `RemoteDesktop` linked to a `ScreenCast` session, acting over EIS. The

@@ -9,11 +9,11 @@ permissions:
 
 jobs:
   build:
-    # macOS only, deliberately. The binary compiles everywhere — `plan`
-    # and `doctor` work on any platform — but input synthesis is
-    # implemented for macOS alone right now, and shipping a Windows or
-    # Linux archive would imply a support this build does not have.
-    # Add targets here when injection actually works on them.
+    # macOS and Linux — the two platforms where injection actually works.
+    # The binary compiles everywhere (`plan` and `doctor` do), but shipping
+    # an archive for a platform that refuses to inject would imply a
+    # support this build does not have. Add targets here when a new
+    # platform's injector lands, not before.
     strategy:
       fail-fast: false
       matrix:
@@ -22,6 +22,11 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-15
             target: x86_64-apple-darwin
+          # Linux is Wayland-only in this release — the Injector refuses
+          # X11 at runtime naming the tracking issue. The archive still
+          # ships one binary because `plan` and `doctor` work everywhere.
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -29,6 +34,15 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      # The Linux binary links against libxkbcommon (the compositor sends
+      # its keymap over EIS and we look characters up in it), so the
+      # headers must be on the runner. Same package CI installs.
+      - name: Install Linux input dependencies
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 libxkbcommon-dev pkg-config
       - run: cargo build --release --locked --target ${{ matrix.target }} -p pixelactions
       - name: Package
         shell: bash

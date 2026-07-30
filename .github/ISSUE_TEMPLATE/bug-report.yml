@@ -15,7 +15,7 @@ body:
     attributes:
       label: pixelactions version
       description: The output of `pixelactions --version`.
-      placeholder: pixelactions 0.1.0
+      placeholder: pixelactions 0.2.0
     validations:
       required: true
   - type: textarea
