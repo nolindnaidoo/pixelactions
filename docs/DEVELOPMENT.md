@@ -36,13 +36,22 @@ Two crates, one boundary:
   (coordinate spaces, the conversion a wrong answer would mean clicking
   the wrong place), `flow` (the flow-file schema, parsed strictly),
   `plan` (resolving labels against a session), `verb` (the chained-argv
-  grammar), `protocol` (the `serve` line-protocol wire types), `report`
-  (run reports and the exit-code contract).
+  grammar), `chord` (the key names a chord may use), `protocol` (the
+  `serve` line-protocol wire types), `report` (run reports and the
+  exit-code contract), `display` (which display server a Linux session
+  runs), `stream` (placing a pixel inside a Wayland input region), and
+  `virtualdesk` (normalizing a pixel into the grid Windows takes).
+
+  The last three are the pattern to copy when a platform needs
+  arithmetic: the OS call lives in the binary, the math that decides
+  *where* lives here, where it is tested without a screen.
 - **`crates/pixelactions`** — the binary: CLI (`cli`, `main`), session
   loading (`session`), shelling out to pixelcoords (`verify`), input
   synthesis behind a trait (`inject`), the run loop (`run`), the line
-  protocol server (`serve`), `doctor`, and the one cfg-gated platform
-  module (`mac`).
+  protocol server (`serve`), `doctor`, and the cfg-gated platform
+  modules: `mac` (the Accessibility grant), `win` (`SendInput`, DPI
+  awareness, the virtual desktop), and `portal` + `eis` (the Wayland
+  grant and its wire protocol).
 
 The rule that keeps the boundary honest: if a platform type appears in
 core, that is a bug. New logic goes in core when it can (where it must be
@@ -64,25 +73,29 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI (`.github/workflows/ci.yml`) runs seven required jobs on every PR —
-all must pass before anything merges to `main`:
+CI (`.github/workflows/ci.yml`) runs these jobs on every PR — all must
+pass before anything merges to `main`:
 
 | Job | What it enforces |
 |-----|------------------|
 | `test` (macOS, Windows, Ubuntu) | fmt, clippy pedantic `-D warnings`, tests, build — per OS |
+| `xvfb` | a real synthetic event, posted to a live X server and read back |
 | `msrv` | the workspace builds on Rust 1.88 |
 | `policy` | no inline `#[allow(...)]` anywhere (workspace-level relaxations only) |
 | `coverage` | 90% line coverage floor **per module** in core |
 | `audit` | `cargo audit` |
 
-Windows and Ubuntu build the platform-free core and prove nothing
-macOS-specific leaked into it. Injection is exercised nowhere in CI — it
-cannot be verified headless, and the tool says so rather than pretending.
+`xvfb` is the only place CI proves injection rather than building it, and
+X11 is the only platform whose display server runs on a runner. It stays a
+smoke test: a headless X server is not a desktop, and nothing there proves
+a click reached an application. **macOS, Windows and Wayland are verified
+by hand on real hardware** — see Testing below.
 
-**Check the other platforms before pushing.** Development happens on
-macOS, where a helper reachable only from a `#[cfg(target_os = "macos")]`
-module still looks used — on Linux and Windows it is dead code, and
-clippy's `-D warnings` fails the build. Catch it locally:
+**Check the other platforms before pushing.** A helper reachable only from
+one platform's `#[cfg]` module still looks used on that platform — and is
+dead code everywhere else, where clippy's `-D warnings` fails the build.
+This is the most common way a green local run turns into a red CI one.
+Catch it locally:
 
 ```bash
 rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
@@ -160,6 +173,23 @@ call site guessing. Never write platform coordinate math from
 assumption; `design/02-TECHNICAL-FOUNDATIONS.md` cites primary sources
 for each platform's conventions and known off-by-ones.
 
+Two of those platforms need a second hop after `Space::Auto`, and both
+put the arithmetic in core rather than in the injector:
+
+- **Windows** takes 0..65535 over the virtual desktop, not pixels.
+  `virtualdesk::normalize` divides by `dimension − 1` and rounds — the
+  off-by-one that otherwise makes the rightmost column unreachable — and
+  refuses a point off the desktop rather than letting Windows clamp it to
+  an edge and click there.
+- **Wayland** takes a position inside a granted region, learned at
+  runtime; `stream::place` does that hop.
+
+**Read the dependency's code, not its README, when the claim is about
+coordinates.** enigo's README says it handles the Windows DPI dance;
+0.6.1's `move_mouse` normalizes against the *primary monitor* and carries
+a `TODO` about `MOUSEEVENTF_VIRTUALDESK`. That is why the Windows pointer
+path is ours and the keyboard is still enigo's.
+
 ## Releases
 
 Before every publish, walk this list — the ones with easy misses first:
@@ -190,10 +220,11 @@ declared stable.
 - The release cut: one PR bumps the workspace version and the core dep
   pin. Then tag `v<X.Y.Z>` — the tag triggers
   `.github/workflows/release.yml`, which builds macOS binaries (arm64 +
-  x86_64) and a Linux x86_64 binary, then opens a **draft** GitHub release
-  with the archives attached. Other platforms are added to that matrix
-  when injection actually works on them; shipping a binary that refuses to
-  inject would imply support this build does not have.
+  x86_64), a Linux x86_64 binary and a Windows x86_64 binary, then opens a
+  **draft** GitHub release with the archives attached. A target belongs in
+  that matrix only once injection actually works on the platform;
+  shipping a binary that refuses to inject would imply support this build
+  does not have.
 - crates.io publish order matters: `cargo publish -p pixelactions-core`
   first, then `-p pixelactions` (the binary's dep pin must resolve).
   Publishes are manual and deliberate; nothing in CI publishes.

@@ -13,7 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-pixelactions-core = { path = "../pixelactions-core", version = "0.2.0" }
+pixelactions-core = { path = "../pixelactions-core", version = "0.4.0" }
 pixelcoords-core = "0.2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

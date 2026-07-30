@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## 0.4.0 — unreleased
+## 0.4.0
 
 **Windows**, through `SendInput` across the whole virtual desktop. The
 same flow file that runs on macOS, Wayland and X11 runs here, which was
@@ -72,7 +72,7 @@ mapping are indistinguishable. The arithmetic those cases depend on is
 unit-tested against a desktop with a negative origin, but no run on real
 hardware backs it yet.
 
-## 0.3.0 — unreleased
+## 0.3.0
 
 **Linux/X11**, through XTEST on the root window. The same flow file that
 runs on macOS and Wayland runs here — and unlike Wayland, with no
