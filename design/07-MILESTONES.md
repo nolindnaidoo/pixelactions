@@ -120,11 +120,35 @@ step on a pointer position it read back.
 
 The platform carrying the most demand (CI rigs, Citrix/VDI, kiosks).
 Adds the multi-monitor normalization work, `MOUSEEVENTF_VIRTUALDESK`,
-the `−1` off-by-one, scancode/Unicode dual keyboard paths, and
+the `−1` off-by-one, Unicode text and virtual-key chords, and
 per-platform `doctor` output.
 
+Three things this milestone settled, one of them by contradicting the
+research:
+
+- **enigo cannot place a pointer on a multi-monitor Windows desktop**, and
+  §1 of design/02 recommending it for all three platforms was right about
+  the keyboard and wrong about the mouse. 0.6.1 normalizes against
+  `SM_CXSCREEN`/`SM_CYSCREEN` and never sets `MOUSEEVENTF_VIRTUALDESK` —
+  there is a `TODO` in `move_mouse` asking whether it should. So absolute
+  motion is ours and everything else is still enigo's. **Read the
+  dependency's code, not its README**, when the claim is about coordinates.
+- **DPI awareness is a precondition of the whole coordinate story**, not a
+  detail of it. An unaware process is handed coordinates virtualized
+  against the primary monitor's scale, so it and pixelcoords would be
+  talking about different pixels. Both declare per-monitor v2 at startup,
+  and `doctor` reports whether it held.
+- **UIPI is the first hard limit this project has documented rather than
+  solved.** No permission lifts it and no amount of engineering reaches the
+  secure desktop. What `doctor` can do is say which side of the line the
+  process is on, which turns a warning into a fact.
+
 **Done when:** the same flow file runs unmodified on macOS, Wayland, X11
-and Windows.
+and Windows. Verified by hand on Windows 11: placement exact at the
+origin, mid-screen and the last pixel (3439, 1439); a click reaching an
+application; `ö` and `×` typed on a US layout; chords and arrows arriving
+as keys. Multi-monitor and mixed-DPI remain unproven on hardware — the
+author's Windows machine has one display — and the docs say so.
 
 ## 0.5.0 — safety and orchestration
 

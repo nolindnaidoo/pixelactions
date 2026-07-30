@@ -23,3 +23,4 @@ pub mod protocol;
 pub mod report;
 pub mod stream;
 pub mod verb;
+pub mod virtualdesk;

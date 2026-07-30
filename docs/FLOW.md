@@ -157,11 +157,12 @@ and a flow file has none by design. That is a job for
   (a stub in a corner) or disable the check while appearing to keep it.
   The watchdog still applies.
 
-  **Wayland is the only platform that needs this.** macOS and Linux/X11
-  both answer where the pointer is, so the kill switch is live there with
-  no opt-out — which also means a flow written with `failsafe = false` for
-  a Wayland machine is running unguarded on the other two. Leave the
-  setting where it belongs: in the flow that needs it.
+  **Wayland is the only platform that needs this.** macOS, Windows and
+  Linux/X11 all answer where the pointer is, so the kill switch is live
+  there with no opt-out — which also means a flow written with
+  `failsafe = false` for a Wayland machine is running unguarded on the
+  other three. Leave the setting where it belongs: in the flow that needs
+  it.
 
 ## Paths
 

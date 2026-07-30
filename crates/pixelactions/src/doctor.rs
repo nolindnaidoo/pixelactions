@@ -91,7 +91,38 @@ struct Report {
     /// a compile-time fact and there is nothing to discover.
     #[serde(skip_serializing_if = "Option::is_none")]
     linux: Option<LinuxStatus>,
+    /// Windows only: the two things that decide whether a coordinate means
+    /// what the session says it means, and whether an event will be
+    /// delivered at all. `None` elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    windows: Option<WindowsStatus>,
     probe: Probe,
+}
+
+/// What a Windows session can do, discovered rather than assumed.
+///
+/// Windows has no permission to report — nothing is granted, nothing is
+/// prompted — so what takes that slot is the two things that actually
+/// decide whether a run behaves: which coordinate space the OS is talking
+/// in, and whether UIPI will drop the events.
+#[derive(Debug, Serialize)]
+struct WindowsStatus {
+    /// Whether this process is per-monitor-DPI-aware v2. When it is not,
+    /// Windows virtualizes every coordinate it reports and accepts against
+    /// the primary monitor's scale, so a session's physical pixels and this
+    /// process's idea of a pixel are different quantities on any scaled
+    /// display. pixelcoords reports the same bit, and the two must agree.
+    dpi_aware_v2: bool,
+    /// The rectangle absolute mouse events are measured against — the
+    /// bounding box of every monitor. Reported because a negative origin is
+    /// the normal shape of a left-hand secondary display and the single
+    /// most common thing to get wrong.
+    virtual_desktop: pixelactions_core::virtualdesk::VirtualDesktop,
+    /// Whether this process runs elevated, which is the whole of what UIPI
+    /// will and will not allow. `None` when the token could not be read —
+    /// "could not tell" is a different answer from "no".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    elevated: Option<bool>,
 }
 
 /// What a Linux session can actually do, discovered rather than assumed.
@@ -204,6 +235,7 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
         },
         accessibility_trusted: trusted(),
         linux: linux_status(),
+        windows: windows_status(),
         probe: probe_result,
     };
     let refusal = can_inject.err();
@@ -226,6 +258,9 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
     );
     if let Some(linux) = &report.linux {
         print_linux(linux);
+    }
+    if let Some(windows) = &report.windows {
+        print_windows(windows);
     }
     println!("native space:    {:?}", report.native_space);
     println!(
@@ -282,6 +317,9 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
 fn inject_line(report: &Report) -> String {
     if !report.capabilities.inject {
         return "no".to_string();
+    }
+    if let Some(windows) = &report.windows {
+        return format!("yes — {}", windows_grant_cost(windows));
     }
     let Some(linux) = &report.linux else {
         return "yes — needs macOS Accessibility permission".to_string();
@@ -356,6 +394,73 @@ fn kill_switch_line(linux: &LinuxStatus) -> &'static str {
         (Server::Wayland, _) => "no eyes on Wayland, and this compositor offers no cursor metadata",
         (Server::Unknown, _) => "nothing to watch — no session was found",
     }
+}
+
+/// What consent costs on Windows: nothing, and the sentence says so in the
+/// same breath as the thing it does cost you, because "no permission
+/// needed" on its own reads as "no limits".
+fn windows_grant_cost(windows: &WindowsStatus) -> &'static str {
+    match windows.elevated {
+        Some(true) => {
+            "nothing to grant, and this process is elevated, so only the secure desktop \
+             (UAC, the login screen) is out of reach"
+        }
+        Some(false) => {
+            "nothing to grant, but UIPI puts elevated windows out of reach — this process \
+             is not elevated"
+        }
+        None => "nothing to grant; UIPI puts elevated windows out of reach",
+    }
+}
+
+/// Whether the coordinates this process sees are the ones the session
+/// recorded. The failure is silent and total on a scaled display, so it is
+/// reported before anything else Windows-specific.
+fn dpi_line(windows: &WindowsStatus) -> &'static str {
+    if windows.dpi_aware_v2 {
+        return "per-monitor v2 — scale factors are read per display, so mixed 100%/150% \
+                layouts resolve correctly";
+    }
+    "NOT per-monitor v2 — something overrode it, and Windows is virtualizing every \
+     coordinate against the primary monitor's scale. Clicks on a scaled display will be \
+     wrong. Check for an app-compatibility override on your terminal"
+}
+
+/// The rectangle an absolute event is measured against. Printed with its
+/// origin because a negative one is the normal shape of a left-hand
+/// secondary display, and seeing it is how a reader confirms the whole
+/// desktop is in play rather than the primary monitor alone.
+fn desktop_line(windows: &WindowsStatus) -> String {
+    let desk = windows.virtual_desktop;
+    format!(
+        "{} × {} from ({}, {}) — every monitor, via MOUSEEVENTF_VIRTUALDESK",
+        desk.width, desk.height, desk.x, desk.y
+    )
+}
+
+/// The UIPI line, stated as a limit rather than as a warning. It is an OS
+/// rule, not a bug and not a setting, and there is no grant that lifts it.
+fn uipi_line(windows: &WindowsStatus) -> &'static str {
+    match windows.elevated {
+        Some(true) => {
+            "elevated — this process can drive elevated windows. The UAC dialog and the \
+             login screen still cannot be reached by anything"
+        }
+        Some(false) => {
+            "not elevated — input to an elevated window will be dropped by Windows, not by \
+             this tool. Run the target unelevated, or run this elevated too"
+        }
+        None => "unknown — this process's token could not be read",
+    }
+}
+
+fn print_windows(windows: &WindowsStatus) {
+    println!("dpi awareness:   {}", dpi_line(windows));
+    println!("virtual desktop: {}", desktop_line(windows));
+    println!("elevation:       {}", uipi_line(windows));
+    println!(
+        "kill switch:     armed — Windows reports the pointer position, so the corner check works"
+    );
 }
 
 fn print_linux(linux: &LinuxStatus) {
@@ -453,6 +558,22 @@ fn wayland_status() -> LinuxStatus {
 
 #[cfg(not(target_os = "linux"))]
 fn linux_status() -> Option<LinuxStatus> {
+    None
+}
+
+/// What this Windows machine will actually do with a coordinate. Every
+/// field is asked rather than assumed, and none of it prompts.
+#[cfg(target_os = "windows")]
+fn windows_status() -> Option<WindowsStatus> {
+    Some(WindowsStatus {
+        dpi_aware_v2: crate::win::is_per_monitor_aware_v2(),
+        virtual_desktop: crate::win::virtual_desktop(),
+        elevated: crate::win::is_elevated(),
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn windows_status() -> Option<WindowsStatus> {
     None
 }
 
@@ -629,7 +750,47 @@ fn probe_wayland() -> Probe {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Windows gets the real proof, for the same reason macOS and X11 do: it
+/// will answer where the pointer is. Read the cursor, move it one pixel,
+/// ask again, put it back.
+///
+/// There is no permission dialog to raise here — nothing to ask for, and
+/// nothing that would grant more. What this can still catch is the failure
+/// that matters on Windows: a higher-integrity window holding the input
+/// desktop, where `SendInput` returns and nothing moves.
+#[cfg(target_os = "windows")]
+fn run_probe(requested: bool) -> Probe {
+    if !requested {
+        return Probe {
+            attempted: false,
+            moved: false,
+            confirmed: false,
+            detail: None,
+        };
+    }
+    let outcome = crate::inject::WindowsInjector::new().and_then(|mut injector| {
+        use crate::inject::Injector;
+        injector.probe()
+    });
+    match outcome {
+        Ok(()) => Probe {
+            attempted: true,
+            moved: true,
+            // Read back from the OS, so this is proof rather than
+            // acceptance.
+            confirmed: true,
+            detail: None,
+        },
+        Err(error) => Probe {
+            attempted: true,
+            moved: false,
+            confirmed: false,
+            detail: Some(format!("{error:#}")),
+        },
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn run_probe(requested: bool) -> Probe {
     Probe {
         attempted: requested,
@@ -686,6 +847,22 @@ mod tests {
             display: Some(":0".to_string()),
             connected: Some(connected),
             ..no_input_path(Server::X11)
+        }
+    }
+
+    /// A Windows machine as `windows_status` would build it: two monitors
+    /// with the secondary placed left of the primary, which is the layout
+    /// whose negative origin the virtual-desktop mapping exists for.
+    fn windows(dpi_aware_v2: bool, elevated: Option<bool>) -> WindowsStatus {
+        WindowsStatus {
+            dpi_aware_v2,
+            virtual_desktop: pixelactions_core::virtualdesk::VirtualDesktop {
+                x: -1920,
+                y: 0,
+                width: 3840,
+                height: 1080,
+            },
+            elevated,
         }
     }
 
@@ -778,6 +955,7 @@ mod tests {
             },
             accessibility_trusted: None,
             linux,
+            windows: None,
             probe: Probe {
                 attempted: false,
                 moved: false,
@@ -802,6 +980,90 @@ mod tests {
         // must survive that.
         let mac_line = inject_line(&report(None));
         assert!(mac_line.contains("Accessibility"), "{mac_line}");
+
+        // Windows takes the same slot with the opposite story: nothing is
+        // granted, and the limit is an integrity level rather than a
+        // permission. It must not borrow macOS's sentence.
+        let mut on_windows = report(None);
+        on_windows.platform = "windows";
+        on_windows.windows = Some(windows(true, Some(false)));
+        let line = inject_line(&on_windows);
+        assert!(line.contains("nothing to grant"), "{line}");
+        assert!(line.contains("UIPI"), "{line}");
+        assert!(!line.contains("Accessibility"), "{line}");
+    }
+
+    /// The DPI line is the one that decides whether every other number in
+    /// the report means anything, so it has to read as a failure when the
+    /// awareness is missing rather than as a note.
+    #[test]
+    fn a_process_without_per_monitor_awareness_says_the_coordinates_are_wrong() {
+        let good = dpi_line(&windows(true, Some(false)));
+        assert!(good.contains("per-monitor v2"), "{good}");
+        assert!(good.contains("mixed"), "names the case it fixes: {good}");
+
+        let bad = dpi_line(&windows(false, Some(false)));
+        assert!(bad.contains("NOT per-monitor v2"), "{bad}");
+        assert!(
+            bad.contains("wrong"),
+            "an unaware process clicks the wrong place, and must say so: {bad}"
+        );
+    }
+
+    /// A secondary display left of the primary gives the desktop a negative
+    /// origin. Printing it is how a reader confirms the whole desktop is in
+    /// play rather than the primary monitor alone — the exact failure
+    /// `MOUSEEVENTF_VIRTUALDESK` exists to prevent.
+    #[test]
+    fn the_virtual_desktop_line_shows_a_negative_origin_rather_than_hiding_it() {
+        let line = desktop_line(&windows(true, None));
+        assert!(line.contains("3840 × 1080"), "{line}");
+        assert!(line.contains("(-1920, 0)"), "{line}");
+        assert!(line.contains("VIRTUALDESK"), "{line}");
+    }
+
+    /// UIPI is an OS limit with no grant behind it, and the two elevation
+    /// states have genuinely different consequences. Reporting one sentence
+    /// for both would make the report useless in exactly the case someone
+    /// runs `doctor` to understand.
+    #[test]
+    fn the_elevation_line_tells_the_two_states_apart() {
+        let unelevated = uipi_line(&windows(true, Some(false)));
+        assert!(unelevated.contains("not elevated"), "{unelevated}");
+        assert!(
+            unelevated.contains("dropped by Windows, not by this tool"),
+            "the refusal is the OS's, and saying so is the point: {unelevated}"
+        );
+
+        let elevated = uipi_line(&windows(true, Some(true)));
+        assert_ne!(elevated, unelevated);
+        assert!(
+            elevated.contains("can drive elevated windows"),
+            "{elevated}"
+        );
+        assert!(
+            elevated.contains("login screen"),
+            "even elevated, the secure desktop is out of reach: {elevated}"
+        );
+
+        // A token that could not be read is its own answer.
+        assert!(uipi_line(&windows(true, None)).contains("unknown"));
+    }
+
+    /// Windows can read the pointer, so the kill switch is armed — the same
+    /// line X11 gets and the opposite of Wayland's. This is the invariant
+    /// AGENTS.md pins: only Wayland carries the exception.
+    #[test]
+    fn windows_serializes_what_it_has_and_nothing_it_does_not() {
+        let json = serde_json::to_string(&windows(true, Some(false))).expect("serializes");
+        assert!(json.contains(r#""dpi_aware_v2":true"#), "{json}");
+        assert!(json.contains(r#""x":-1920"#), "{json}");
+        assert!(json.contains(r#""elevated":false"#), "{json}");
+
+        // An unreadable token is absent rather than false — the same rule
+        // the Linux fields follow, for the same reason.
+        let json = serde_json::to_string(&windows(true, None)).expect("serializes");
+        assert!(!json.contains("elevated"), "{json}");
     }
 
     /// An X11 session must serialize without portal fields at all. A `0`

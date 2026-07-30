@@ -13,7 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-pixelactions-core = { path = "../pixelactions-core", version = "0.3.0" }
+pixelactions-core = { path = "../pixelactions-core", version = "0.4.0" }
 pixelcoords-core = "0.2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -41,6 +41,29 @@ enigo = "0.6"
 zbus = "5"
 reis = "0.7"
 xkbcommon = { version = "0.9", features = ["wayland"] }
+
+# Not a new crate in the tree: enigo already builds `windows` 0.61 with
+# every feature named here except the two token ones. It is named directly
+# because the Windows pointer path is written here rather than taken from
+# enigo — see `win.rs` — and `INPUT` is a struct wrapping a union whose
+# layout must be exactly right. Declaring it by hand to save a dependency
+# that is already compiled would trade a real risk for no saving.
+#
+# - Input_KeyboardAndMouse: SendInput and MOUSEEVENTF_VIRTUALDESK.
+# - WindowsAndMessaging: the SM_*VIRTUALSCREEN metrics and GetCursorPos.
+# - HiDpi: per-monitor-v2 awareness, without which every one of the above
+#   returns coordinates virtualized against the primary monitor's scale.
+# - Security + System_Threading: the process elevation bit `doctor` reports,
+#   which is the whole UIPI story in one answer.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [lints]
 workspace = true

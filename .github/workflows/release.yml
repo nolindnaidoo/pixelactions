@@ -9,10 +9,10 @@ permissions:
 
 jobs:
   build:
-    # macOS and Linux — the two platforms where injection actually works.
-    # The binary compiles everywhere (`plan` and `doctor` do), but shipping
-    # an archive for a platform that refuses to inject would imply a
-    # support this build does not have. Add targets here when a new
+    # Every platform where injection actually works — which is now all of
+    # them. The binary compiles anywhere (`plan` and `doctor` do), but
+    # shipping an archive for a platform that refuses to inject would imply
+    # a support this build does not have. Add targets here when a new
     # platform's injector lands, not before.
     strategy:
       fail-fast: false
@@ -22,11 +22,13 @@ jobs:
             target: aarch64-apple-darwin
           - os: macos-15
             target: x86_64-apple-darwin
-          # Linux is Wayland-only in this release — the Injector refuses
-          # X11 at runtime naming the tracking issue. The archive still
-          # ships one binary because `plan` and `doctor` work everywhere.
+          # One Linux binary covers both display servers: which one it
+          # speaks is decided from the session at runtime, not at build
+          # time.
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -44,6 +46,10 @@ jobs:
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
           sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 libxkbcommon-dev pkg-config
       - run: cargo build --release --locked --target ${{ matrix.target }} -p pixelactions
+      # Zip on Windows, tar.gz elsewhere — each platform's own convention,
+      # so the archive opens with what the reader already has. The binary
+      # carries the .exe suffix there, which is why the copy is branched
+      # rather than shared.
       - name: Package
         shell: bash
         run: |
@@ -51,9 +57,16 @@ jobs:
           mkdir "$name"
           cp README.md LICENSE CHANGELOG.md SKILL.md "$name/"
           cp -r examples "$name/"
-          cp "target/${{ matrix.target }}/release/pixelactions" "$name/"
-          tar czf "$name.tar.gz" "$name"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/pixelactions.exe" "$name/"
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            cp "target/${{ matrix.target }}/release/pixelactions" "$name/"
+            tar czf "$name.tar.gz" "$name"
+          fi
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           draft: true
-          files: pixelactions-*.tar.gz
+          files: |
+            pixelactions-*.tar.gz
+            pixelactions-*.zip

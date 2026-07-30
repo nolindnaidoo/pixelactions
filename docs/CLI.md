@@ -128,7 +128,49 @@ pixelactions doctor [--json] [--probe]
 Reports the platform, the coordinate space its input API expects, the
 session schema this build understands, the pixelcoords binary it will
 call and whether it is new enough, and — on macOS — whether Accessibility
-is granted.
+is granted. On Windows and Linux it reports the platform's own story
+instead, because those platforms have different things to answer for.
+
+On **Windows** it reports the two things that decide whether a run
+behaves, neither of which is a permission:
+
+```
+platform:        windows
+supported:       yes
+dpi awareness:   per-monitor v2 — scale factors are read per display, so mixed 100%/150% layouts resolve correctly
+virtual desktop: 3440 × 1440 from (0, 0) — every monitor, via MOUSEEVENTF_VIRTUALDESK
+elevation:       not elevated — input to an elevated window will be dropped by Windows, not by this tool
+kill switch:     armed — Windows reports the pointer position, so the corner check works
+native space:    Physical
+```
+
+- **`dpi awareness`** is the one that silently invalidates everything
+  else. A process that is not per-monitor-v2 aware is handed coordinates
+  virtualized against the primary monitor's scale, so on a scaled display
+  the pixels a session records and the pixels this process can address are
+  different quantities. pixelactions declares the awareness at startup and
+  pixelcoords does the same; this line reports whether it actually holds,
+  because an app-compatibility override can take it away.
+- **`virtual desktop`** is the rectangle an absolute mouse event is
+  measured against — the bounding box of every monitor. Its origin is the
+  primary display's top-left, so a **negative** origin is the normal shape
+  of a secondary display placed to the left, not an error. Seeing it is
+  how you confirm the whole desktop is in play rather than the primary
+  monitor alone.
+- **`elevation`** is the whole of the UIPI story. Windows will not deliver
+  input from a medium-integrity process to a window running elevated, and
+  no grant exists that changes that. The line says which side you are on
+  rather than warning about both.
+
+A point that is not on this machine's desktop is **refused by name**, not
+clamped — Windows would otherwise slide an out-of-range absolute event to
+the nearest edge and click there. That is what a session captured on a
+different machine looks like:
+
+```
+failed    1. scroll off_this_desktop down 1 (0 ms)
+          (3900, 1450) is not a point on this machine's desktop, which spans 3440 × 1440 from (0, 0). …
+```
 
 On **Linux** it also reports what had to be discovered rather than
 assumed, because the same binary faces a different windowing system
@@ -203,6 +245,11 @@ proves nothing. If the grant is missing, the probe asks macOS for it,
 which raises the system dialog and adds the calling application to the
 Accessibility list.
 
+On **Windows** it does the same, and there is no dialog to raise because
+there is nothing to grant. What it can still catch is the failure that
+matters there: a higher-integrity window holding the input desktop, where
+`SendInput` returns success and the pointer does not move.
+
 On **X11** it does the same thing, for the same reason it can: X11 will
 answer where the pointer is. `XSync` alone would prove only that the
 server *processed* a fake event, which is not the same as having acted on
@@ -223,8 +270,8 @@ probe:           input was granted and accepted, NOT confirmed
 ```
 
 The JSON carries this as `moved` and `confirmed` separately: `moved` is
-"the platform accepted it", `confirmed` is "the OS proved it". macOS and
-X11 set both; Wayland cannot set the second. It is the same distinction a
+"the platform accepted it", `confirmed` is "the OS proved it". macOS,
+Windows and X11 set both; Wayland cannot set the second. It is the same distinction a
 run report draws between `executed` and `verified` — "nothing errored" is
 not "it worked".
 
