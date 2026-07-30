@@ -1,6 +1,6 @@
 [package]
 name = "pixelactions-core"
-description = "Platform-free core for pixelactions: flow schema, plan resolution, coordinate-space conversion, run reports"
+description = "Platform-free core of pixelactions: coordinate-space conversion for macOS CGEvent, Windows SendInput, and Linux XTEST — physical pixels vs logical points, HiDPI and multi-monitor — plus the flow schema, label resolution, and run reports"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,14 @@ readme = "README.md"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
-keywords.workspace = true
-categories.workspace = true
+# The library's slots, not the tool's. Someone depending on this crate is
+# writing their own executor, so the words are the domain's, not the
+# product's: `rpa` and `ui-automation` for what it is, `computer-use` for
+# who is building it now, `hidpi` and `multi-monitor` for the conversion
+# this crate exists to get right. NOT `command-line-utilities`: this is a
+# platform-free library.
+keywords = ["computer-use", "ui-automation", "rpa", "hidpi", "multi-monitor"]
+categories = ["development-tools", "development-tools::testing"]
 
 [dependencies]
 # The session schema, from the sister tool's published crate — a caret
