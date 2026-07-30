@@ -54,18 +54,52 @@ multiplying platforms.
 **Definition of done:** the author uses it for a real repetitive task
 for a week without reaching for anything else.
 
-## 0.2.0 — Windows + X11
+## 0.2.0 — Wayland, rung A
 
-The two platforms carrying today's demand (CI rigs, Citrix/VDI,
-kiosks, and every agent stack shelling out to xdotool in a container).
+**Reordered, and worth saying why.** This was planned for 0.5.0+, after
+Windows and X11, as "earned upside". It landed first instead, because
+development moved to a Linux desktop and the platform under the
+developer's hands is the one that gets run daily — which is the whole
+definition of done for 0.1.0 and applies just as well here. Windows and
+X11 keep their scope and shift down a version each; no version is
+skipped.
+
+Portal `RemoteDesktop` linked to a `ScreenCast` session, acting over EIS,
+on GNOME and KDE. The consent grant is remembered so the dialog happens
+at setup time rather than mid-run.
+
+Two things this milestone established that the research could not:
+
+- The absolute-motion region arrives on the **EI device**, not from the
+  PipeWire stream, so exact placement needs no PipeWire connection. That
+  is what made rung A shippable on its own.
+- There is no cursor position to read, so the kill switch is **refused**
+  rather than stubbed, and a Wayland flow opts out in writing. Closing
+  that gap needs the stream's cursor metadata, which is its own step.
+
+**Done when:** a flow file resolves, relocates, acts and reports on a
+Wayland session. Verified by hand on GNOME 46: a marked region clicked
+and the application reacted, placement exact to the pixel.
+
+## 0.3.0 — Windows
+
+The platform carrying the most demand (CI rigs, Citrix/VDI, kiosks).
 Adds the multi-monitor normalization work, `MOUSEEVENTF_VIRTUALDESK`,
 the `−1` off-by-one, scancode/Unicode dual keyboard paths, and
 per-platform `doctor` output.
 
-**Done when:** the same flow file runs unmodified on all three
-platforms, and CI proves it on a headed runner where possible.
+## 0.4.0 — Linux/X11
 
-## 0.3.0 — safety and orchestration
+Every agent stack shelling out to xdotool in a container is doing
+coordinate injection on X11 with no relocation and no verification —
+exactly the loop this tool closes. XTEST in root-window pixels, off-layout
+typing via temporary keymap remapping, and the one platform where a real
+display server can run in CI (Xvfb).
+
+**Done when:** the same flow file runs unmodified on macOS, Wayland,
+Windows and X11, and CI proves what it can on a headed runner.
+
+## 0.5.0 — safety and orchestration
 
 What remains here after the early landings above: an audit log.
 Observable polling, the watchdog, and the kill switch shipped in
@@ -81,19 +115,28 @@ Argv chaining, `serve` (NDJSON over stdio), and `SKILL.md` all landed
 early. Deliberately before the MCP question, because the CLI surface
 reaches strictly more agents than a stdio MCP server does.
 
-## 0.4.0 — the agent surface
+## 0.6.0 — the agent surface
 
 `pixelactions mcp`: `find` / `act` / `assert` as MCP tools. The research
 says agent stacks currently wrap pyautogui and robotjs with no
 verification; this is the commercially relevant surface, and it's
 worthless before the executor is proven — hence last, not first.
 
-## 0.5.0+ — the Wayland ladder
+## Later — the rest of the Wayland ladder
 
-Portal RemoteDesktop + EIS with a screencast-linked stream (GNOME,
-KDE) → `zwlr_virtual_pointer_v1` (wlroots) → uinput for
-relative/keyboard with absolute honestly refused. Earned upside, on top
-of a tool that already works.
+Rung A shipped in 0.2.0. What remains, in order of how much it buys:
+
+- **The kill switch gets eyes.** Consume the granted stream's cursor
+  metadata over PipeWire so the corner check works on Wayland and
+  `failsafe = false` stops being mandatory. The largest gap in the
+  platform today.
+- **`zwlr_virtual_pointer_v1`** (sway, Hyprland, river): wlroots
+  compositors have uneven portal `RemoteDesktop` coverage but a real
+  absolute-pointer protocol with no dialog.
+- **uinput**, keyboard and relative only, with absolute **refused** —
+  a uinput ABS axis maps to a device range the compositor does not tie to
+  screen pixels, so clicking *near* the right place is worse than
+  refusing.
 
 ## What "valuable" means, concretely
 

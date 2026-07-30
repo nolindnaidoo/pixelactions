@@ -15,10 +15,16 @@ verification (`assert`). **pixelactions consumes that ground truth and
 performs the interactions** — click, type, chord, drag — declaratively,
 and confirms they landed.
 
-Current scope: **macOS**, the full loop — resolve, re-locate, act,
-verify — driven three ways: chained argv, flow files, and the `serve`
-line protocol. Windows and X11 are the next milestone. See
-`design/07-MILESTONES.md`.
+Current scope: **macOS** and **Linux under Wayland** (GNOME and KDE, via
+the xdg-desktop-portal `RemoteDesktop` + EIS path), the full loop —
+resolve, re-locate, act, verify — driven three ways: chained argv, flow
+files, and the `serve` line protocol. X11 and Windows are the next
+milestones. See `design/07-MILESTONES.md`.
+
+Wayland carries one documented exception to the safety rules below: it
+exposes no way to read the pointer position, so the corner kill switch
+has nothing to watch and a flow must set `failsafe = false`
+deliberately. Nothing is stubbed to hide that — see `inject`'s `cursor`.
 
 **The three surfaces are one implementation.** Chained verbs and a
 protocol request both build the same `Flow` and go through the same
