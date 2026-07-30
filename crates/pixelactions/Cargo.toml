@@ -9,6 +9,15 @@ readme.workspace = true
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
+# Set HERE and deliberately not in [workspace.package], because the two
+# crates want different answers. This one is bin-only, so docs.rs runs
+# `cargo doc`, finds no library target, and records a failed build — there
+# is nothing to document and no way to opt out of the attempt. With this
+# field unset crates.io links "Documentation" at that failure page; with it
+# set, it links the command reference, which is what someone clicking it
+# actually wants. pixelactions-core leaves it unset on purpose: it IS a
+# library, its docs.rs build is green, and the default link is correct.
+documentation = "https://github.com/nolindnaidoo/pixelactions/blob/main/docs/CLI.md"
 keywords.workspace = true
 categories.workspace = true
 

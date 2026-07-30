@@ -228,6 +228,15 @@ declared stable.
 - crates.io publish order matters: `cargo publish -p pixelactions-core`
   first, then `-p pixelactions` (the binary's dep pin must resolve).
   Publishes are manual and deliberate; nothing in CI publishes.
+- **docs.rs will always record a failed build for `pixelactions`, and that
+  is correct.** It is a bin-only package, so `cargo doc` finds no library
+  target; docs.rs builds every published crate and has no "nothing to
+  document" state to report instead. The consequence worth managing is the
+  link: with `documentation` unset, crates.io points "Documentation" at
+  that failure page, so the binary's manifest sets it to `docs/CLI.md`.
+  **Do not lift that field into `[workspace.package]`** — inheriting it
+  would drag `pixelactions-core` off its own docs.rs page, which builds
+  green and is the right destination for a library.
 - `pixelcoords-core` is a **crates.io dependency with a caret range,
   never a path dependency** — see the compatibility contract in
   AGENTS.md. The sister repo releases on its own schedule; this one
