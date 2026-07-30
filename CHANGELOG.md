@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## 0.4.0
+## 0.4.0 — 2026-07-30
 
 **Windows**, through `SendInput` across the whole virtual desktop. The
 same flow file that runs on macOS, Wayland and X11 runs here, which was
