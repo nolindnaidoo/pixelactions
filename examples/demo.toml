@@ -1,13 +1,34 @@
-# A flow against the session captured while recording the pixelcoords demo.
-session = "/Users/dev/Downloads/pixelcoords-captures/20260728-182121-117"
+# The README's flow, as a file you can actually run.
+#
+# Mark the regions this references, by these labels, then run it:
+#
+#   pixelcoords                                 # mark "email" and "success"
+#   pixelactions plan --flow demo.toml          # every coordinate, acts on nothing
+#   pixelactions run  --flow demo.toml --yes
+#
+# `plan` resolves every label and prints where each step would land without
+# injecting anything. It is the right first run on a new machine.
+
+session = "~/captures/checkout"
 
 [settings]
+# "auto" resolves to whatever the current platform's input API expects —
+# logical points on macOS, physical pixels on Windows and X11. Pin it only
+# to reproduce a coordinate-space mismatch.
 space = "auto"
 
 [[step]]
 action = "click"
-target = ""
+target = "email"
 
 [[step]]
 action = "type"
-text = "pixelactions"
+text = "a@b.com"
+
+[[step]]
+action = "key"
+chord = "enter"
+
+[[step]]
+action = "verify"
+target = "success"
