@@ -64,10 +64,8 @@ struct Server<'a> {
 
 /// Read requests until stdin closes or the client says `bye`.
 pub fn run(session_directory: &Path) -> Result<i32> {
-    if !cfg!(target_os = "macos") {
-        return Ok(refuse_on_stdout(
-            "input synthesis is macOS-only in this build — `plan` works everywhere",
-        ));
+    if let Err(reason) = crate::inject::availability() {
+        return Ok(refuse_on_stdout(&reason));
     }
     if let Err(reason) = crate::doctor::require_supported_pixelcoords() {
         return Ok(refuse_on_stdout(&reason));
@@ -80,7 +78,7 @@ pub fn run(session_directory: &Path) -> Result<i32> {
     // reads stdout and is told never to treat stderr as failure, so
     // dying with the explanation only on stderr would leave it staring
     // at a closed pipe with no idea why.
-    let mut injector = match crate::make_injector() {
+    let mut injector = match crate::make_injector(&session.monitors) {
         Ok(injector) => injector,
         Err(error) => return Ok(refuse_on_stdout(&format!("{error:#}"))),
     };

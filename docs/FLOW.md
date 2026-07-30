@@ -99,6 +99,15 @@ and a flow file has none by design. That is a job for
   each region is *now*. Regions that moved yield corrected coordinates;
   regions that cannot be found unambiguously stop the run before
   anything is injected.
+
+  **Mark a region in the state you will act in.** Relocation compares
+  pixels, and a window's controls are drawn differently when the window
+  is not focused — same button, different pixels. A region marked while
+  its window was focused can score *below* the match floor when the run
+  happens with focus elsewhere, which reads as "the screen moved" when
+  nothing did. Measured: a calculator key crop scored 0.794 unfocused
+  against 0.99999 focused. If a flow starts by giving a window focus,
+  mark its regions with that window focused too.
 - **`verify`** — when to re-confirm a region. `each` (default) checks
   immediately **before** each step that touches a region, and acts on
   where it is found; `none` acts on the coordinates already known. A
@@ -139,6 +148,14 @@ and a flow file has none by design. That is a job for
   corner of a screen. If the cursor cannot be read at all, the step
   fails rather than proceeding unchecked — a safety check that silently
   stops evaluating is worse than one that was never claimed.
+
+  **On Wayland this must be set to `false`.** Wayland exposes no way to
+  ask where the pointer is, so there is nothing for the corner check to
+  watch, and by the rule just above every step fails until the flow opts
+  out. That is deliberate: degraded safety is a choice the flow author
+  makes in writing. Faking a cursor position would either abort every run
+  (a stub in a corner) or disable the check while appearing to keep it.
+  The watchdog still applies.
 
 ## Paths
 

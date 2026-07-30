@@ -44,9 +44,10 @@ best executor in this category and give it away.
 
 ## Status
 
-**Early, and macOS only.** The loop works end to end: resolve a label to
-its click point, re-locate it against a fresh capture, act, and confirm.
-Windows and X11 are next; no crate or binaries are published yet.
+**Early.** The loop works end to end on **macOS** and on **Linux under
+Wayland** (GNOME and KDE): resolve a label to its click point, re-locate
+it against a fresh capture, act, and confirm. X11 and Windows are next;
+no crate or binaries are published yet.
 
 ## Install
 
@@ -65,9 +66,24 @@ binary for capture-time work — install both:
 cargo install pixelcoords pixelactions
 ```
 
-macOS asks for an Accessibility grant on first run. The grant attaches
-to the terminal that launches pixelactions, not the binary —
-`pixelactions doctor --probe` proves the grant instead of assuming it.
+Building on Linux needs the xkbcommon headers, because typing means
+looking a character up in the compositor's own keymap:
+
+```bash
+sudo apt-get install -y libxkbcommon-dev pkg-config
+```
+
+**The grant, per platform.** Either way,
+`pixelactions doctor --probe` proves what it can rather than assuming it,
+and is the right place to answer the prompt — a dialog appearing partway
+through an unattended run is worse than a refusal.
+
+- **macOS** asks for an Accessibility grant on first run. It attaches to
+  the terminal that launches pixelactions, not to the binary.
+- **Linux/Wayland** asks you to share a screen, once. The grant is
+  remembered in `$XDG_STATE_HOME/pixelactions/`, so later runs do not
+  prompt. Sharing is not optional: exact pointer placement is measured
+  against the region the compositor grants with it.
 
 ## Three ways to drive it
 
@@ -174,9 +190,35 @@ instead of the two we could afford to embed.
 | Platform | State |
 |----------|-------|
 | macOS | Supported — the loop works end to end; primary development platform |
+| Linux (Wayland) | Supported on GNOME and KDE, via the portal + EIS path. One caveat: no kill switch — see below |
+| Linux (X11) | Next — refused rather than half-served today |
 | Windows | Next — the goal is the same flow file running unmodified |
-| Linux (X11) | Next — alongside Windows |
-| Linux (Wayland) | Later — after Windows and X11 |
+
+Verified on Wayland by running the loop: a region marked in pixelcoords
+on GNOME 46, relocated, clicked, and the application reacted. Placement
+is exact — a rectangle dragged at (82, 328) recorded as (82, 328).
+
+**The Wayland caveat, stated plainly.** Wayland exposes no way to ask
+where the pointer is — the same isolation that makes injection require
+your consent also hides the pointer from other programs. So the corner
+kill switch has nothing to watch, and a flow must opt out of it
+deliberately:
+
+```toml
+[settings]
+failsafe = false
+```
+
+Nothing is faked to avoid this. A stubbed cursor position would either
+sit in a screen corner and abort every run, or disable the check while
+appearing to keep it. `doctor` reports whether your compositor could
+supply the pointer position through screencast metadata, which is what
+lifting this needs.
+
+X11 is **refused**, not approximated: injecting through XWayland reaches
+X clients only, so the pointer would travel over native windows that
+never receive the events — a run that clicks through some windows and not
+others while reporting success. `plan` works on every session type.
 
 No crate or binaries are published yet. This table is kept honest —
 claims match runs.

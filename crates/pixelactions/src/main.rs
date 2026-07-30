@@ -7,9 +7,13 @@
 
 mod cli;
 mod doctor;
+#[cfg(target_os = "linux")]
+mod eis;
 mod inject;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "linux")]
+mod portal;
 mod run;
 mod serve;
 mod session;
@@ -74,11 +78,12 @@ fn main() {
 /// Perform a flow. Returns the process exit code rather than exiting, so
 /// the run report is always printed first.
 fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
-    if !cfg!(target_os = "macos") {
-        eprintln!(
-            "pixelactions: input synthesis is macOS-only in this build — \
-             `plan` works everywhere"
-        );
+    // Whether input can be synthesized is a runtime question on Linux —
+    // an X11 session and a Wayland session need different paths, and the
+    // compositor may implement neither. Asked before anything is loaded,
+    // so a refusal is the first thing the reader sees.
+    if let Err(reason) = inject::availability() {
+        eprintln!("pixelactions: {reason}");
         return Ok(EXIT_REFUSED);
     }
     // Refuse before acting, not after a confusing failure: relocation and
@@ -156,7 +161,7 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
     let progress: &dyn Fn(&pixelactions_core::report::StepReport) =
         if json { run::silent() } else { &live };
 
-    let mut injector = make_injector()?;
+    let mut injector = make_injector(&session.monitors)?;
     let report = run::execute(
         injector.as_mut(),
         &run::Context {
@@ -178,13 +183,30 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
     Ok(report.exit_code())
 }
 
+/// Build the real injector.
+///
+/// The monitors are a parameter because Wayland needs them: a physical
+/// pixel only means something there once it is mapped into the region the
+/// compositor granted, and that mapping needs the session's own layout.
+/// Platforms whose input space is knowable at compile time ignore them.
 #[cfg(target_os = "macos")]
-pub fn make_injector() -> Result<Box<dyn inject::Injector>> {
+pub fn make_injector(
+    _monitors: &[pixelcoords_core::session::MonitorRecord],
+) -> Result<Box<dyn inject::Injector>> {
     Ok(Box::new(inject::RealInjector::new()?))
 }
 
-#[cfg(not(target_os = "macos"))]
-pub fn make_injector() -> Result<Box<dyn inject::Injector>> {
+#[cfg(target_os = "linux")]
+pub fn make_injector(
+    monitors: &[pixelcoords_core::session::MonitorRecord],
+) -> Result<Box<dyn inject::Injector>> {
+    Ok(Box::new(inject::RealInjector::new(monitors)?))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn make_injector(
+    _monitors: &[pixelcoords_core::session::MonitorRecord],
+) -> Result<Box<dyn inject::Injector>> {
     anyhow::bail!("input synthesis is not implemented for this platform yet")
 }
 
