@@ -143,6 +143,12 @@ impl Injector for Recording {
 #[cfg(target_os = "macos")]
 pub use platform::RealInjector;
 
+/// Windows names its injector rather than calling it `RealInjector`, for
+/// the same reason Linux names its two: the type says which input path it
+/// speaks, and this one is not the enigo-only path macOS takes.
+#[cfg(target_os = "windows")]
+pub use win32::WindowsInjector;
+
 /// Linux has two real injectors because it has two display servers, and
 /// which one a machine runs is a runtime fact rather than a build-time one.
 /// They are named rather than hidden behind one `RealInjector` so a call
@@ -217,28 +223,35 @@ pub fn availability() -> Result<(), String> {
     Ok(())
 }
 
+/// Off Linux the answer is a build-time fact: there is one windowing system
+/// per platform, and no session to inspect. Windows joins macOS here — it
+/// has no grant to check, so a build that compiled the injector can use it,
+/// and anything that will actually stop an event (UIPI) is discovered when
+/// the event is sent, not before.
 #[cfg(not(target_os = "linux"))]
 pub fn availability() -> Result<(), String> {
-    if cfg!(target_os = "macos") {
+    if cfg!(any(target_os = "macos", target_os = "windows")) {
         return Ok(());
     }
     Err("input synthesis is not implemented for this platform yet — `plan` works everywhere".into())
 }
 
-/// Chord tokens → enigo keys, shared by every platform whose injector is
-/// enigo: macOS and X11 today, Windows when it lands.
+/// Chord tokens → enigo keys, shared by every platform whose keyboard is
+/// enigo's: macOS, X11 and Windows.
 ///
 /// One table, because a chord string is a portability promise. `cmd+s`
-/// written on a Mac has to press Super+s on Linux, and it does —
-/// `Key::Meta` is `Super_L` on X11 and `VK_LWIN` on Windows. A second copy
-/// of this table per platform is how that promise quietly stops being true.
+/// written on a Mac has to press Super+s on Linux and Win+s on Windows, and
+/// it does — `Key::Meta` is `Super_L` on X11 and `VK_LWIN` on Windows. A
+/// second copy of this table per platform is how that promise quietly stops
+/// being true, which is why Windows joined this one rather than growing its
+/// own.
 ///
 /// Wayland cannot share it: an EI keyboard is addressed by keysym against
 /// the compositor's own keymap, not by enigo key, so `eis` carries the
 /// parallel table. Both are checked against
 /// [`pixelactions_core::chord::NAMED_KEYS`], which is what keeps them from
 /// drifting.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod keys {
     use anyhow::{Context, Result, anyhow};
     use enigo::Key;
@@ -740,6 +753,236 @@ mod x11 {
                     "names the point it refused: {message}"
                 );
             }
+        }
+    }
+}
+
+/// Windows: `SendInput` across the whole virtual desktop, with enigo's
+/// keyboard.
+///
+/// **A split implementation, deliberately.** enigo owns everything that
+/// carries no coordinate — buttons, the wheel, `KEYEVENTF_UNICODE` text,
+/// and virtual-key chords with the extended-key flag that arrows and
+/// right-hand modifiers need. Absolute pointer motion is the one thing it
+/// gets wrong here: 0.6.1 normalizes against `SM_CXSCREEN`/`SM_CYSCREEN` —
+/// the primary monitor — and never sets `MOUSEEVENTF_VIRTUALDESK`, so a
+/// coordinate on any other display silently lands on the primary one. That
+/// path is written out in [`crate::win`] instead, over the arithmetic in
+/// [`pixelactions_core::virtualdesk`].
+///
+/// Two things Windows shares with X11 and not with Wayland: the pointer
+/// position can be **read**, so the corner kill switch is armed and the
+/// probe is a real proof; and typing is **layout-independent**, because
+/// `KEYEVENTF_UNICODE` carries the character itself rather than a key that
+/// happens to produce it.
+///
+/// What Windows has that nothing else does: **UIPI**. A process at medium
+/// integrity cannot send input to a window at high integrity, to the UAC
+/// dialog, or to the login screen. `SendInput` reports that by accepting
+/// fewer events than it was given, which is the one failure this module
+/// translates into a sentence naming the cause.
+#[cfg(target_os = "windows")]
+mod win32 {
+    use anyhow::{Result, anyhow, bail};
+    use enigo::{
+        Axis as EnigoAxis, Button as EnigoButton, Direction, Enigo, Keyboard, Mouse, Settings,
+    };
+    use pixelactions_core::flow::Axis;
+    use pixelactions_core::virtualdesk::normalize;
+
+    use super::{Button, Injector, keys::key_for};
+    use crate::win;
+
+    /// How long to wait before asking Windows where the pointer ended up.
+    /// `SendInput` queues onto the input thread's message loop; the call
+    /// returning proves it was queued, and only the read-back proves it was
+    /// acted on.
+    const PROBE_SETTLE: std::time::Duration = std::time::Duration::from_millis(40);
+
+    pub struct WindowsInjector {
+        /// Keyboard, buttons and wheel. The pointer does not go through
+        /// here — see the module note.
+        enigo: Enigo,
+    }
+
+    impl WindowsInjector {
+        /// Construct, and mean it.
+        ///
+        /// There is no Accessibility grant on Windows and nothing to
+        /// prompt for, so unlike macOS a failure here is not a missing
+        /// permission — it is a session with no window station to talk to,
+        /// which is what a service account or a disconnected RDP session
+        /// looks like.
+        pub fn new() -> Result<Self> {
+            let enigo = Enigo::new(&Settings::default()).map_err(|error| {
+                anyhow!(
+                    "cannot synthesize input: {error}. Windows asks for no permission to \
+                     do this, so a failure here means there is no interactive desktop to \
+                     send to — a service, a scheduled task with \"run whether the user is \
+                     logged on or not\", or an RDP session that has been disconnected \
+                     rather than logged out"
+                )
+            })?;
+            Ok(Self { enigo })
+        }
+
+        /// One harmless pixel sideways, reported as whether Windows honored
+        /// it. Put back either way.
+        fn nudge(from: (i32, i32), step: i32) -> Result<bool> {
+            place(from.0 + step, from.1)?;
+            std::thread::sleep(PROBE_SETTLE);
+            let after = read_cursor()?;
+            let _ = place(from.0, from.1);
+            Ok(after != from)
+        }
+    }
+
+    /// Normalize a global physical pixel and send it. The whole of the
+    /// Windows coordinate story, in one place.
+    ///
+    /// The desktop is read on every move rather than cached at
+    /// construction: a monitor unplugged or a resolution changed mid-run
+    /// moves the rectangle these numbers are measured against, and a stale
+    /// one would put every subsequent click somewhere plausible and wrong.
+    fn place(x: i32, y: i32) -> Result<()> {
+        let desktop = win::virtual_desktop();
+        let (dx, dy) = normalize(desktop, x, y).map_err(|error| anyhow!("{error}"))?;
+        win::move_absolute(dx, dy).map_err(|reason| anyhow!("move to ({x}, {y}): {reason}"))
+    }
+
+    /// Where Windows says the pointer is, or why it would not say.
+    fn read_cursor() -> Result<(i32, i32)> {
+        win::cursor_position().ok_or_else(|| anyhow!("cannot read the cursor position"))
+    }
+
+    fn to_enigo(button: Button) -> EnigoButton {
+        match button {
+            Button::Left => EnigoButton::Left,
+        }
+    }
+
+    impl Injector for WindowsInjector {
+        /// Takes global physical pixels — the session's own space, and the
+        /// virtual desktop's, given the per-monitor DPI awareness `main`
+        /// declares at startup.
+        fn move_to(&mut self, x: f64, y: f64) -> Result<()> {
+            place(x.round() as i32, y.round() as i32)
+        }
+
+        fn click(&mut self, button: Button) -> Result<()> {
+            self.enigo
+                .button(to_enigo(button), Direction::Click)
+                .map_err(|error| anyhow!("click failed: {error}"))
+        }
+
+        fn double_click(&mut self, button: Button) -> Result<()> {
+            self.click(button)?;
+            // The application decides what counts as a double-click by
+            // timing, same as everywhere else; a short gap keeps both
+            // inside its window.
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            self.click(button)
+        }
+
+        fn press(&mut self, button: Button) -> Result<()> {
+            self.enigo
+                .button(to_enigo(button), Direction::Press)
+                .map_err(|error| anyhow!("press failed: {error}"))
+        }
+
+        fn release(&mut self, button: Button) -> Result<()> {
+            self.enigo
+                .button(to_enigo(button), Direction::Release)
+                .map_err(|error| anyhow!("release failed: {error}"))
+        }
+
+        /// `KEYEVENTF_UNICODE`, so the text does not have to be reachable
+        /// on the active layout. The documented limits are the same as
+        /// macOS's Unicode path: it cannot express a shortcut, and a target
+        /// with an IME active may compose rather than commit.
+        fn text(&mut self, text: &str) -> Result<()> {
+            self.enigo
+                .text(text)
+                .map_err(|error| anyhow!("typing failed: {error}"))
+        }
+
+        fn chord(&mut self, chord: &str) -> Result<()> {
+            let (modifiers, key) = pixelactions_core::chord::split(chord)?;
+            let mut held = Vec::new();
+            for token in &modifiers {
+                let modifier = key_for(token)?;
+                self.enigo
+                    .key(modifier, Direction::Press)
+                    .map_err(|error| anyhow!("holding {token} failed: {error}"))?;
+                held.push(modifier);
+            }
+            let result = self
+                .enigo
+                .key(key_for(key)?, Direction::Click)
+                .map_err(|error| anyhow!("pressing {key} failed: {error}"));
+            // Release in reverse whatever happened to the key press — a
+            // stuck modifier is worse than a failed chord.
+            for modifier in held.into_iter().rev() {
+                let _ = self.enigo.key(modifier, Direction::Release);
+            }
+            result
+        }
+
+        /// Wheel clicks land wherever the pointer is. `MOUSEEVENTF_WHEEL`
+        /// carries no coordinate, so this needs nothing from the virtual
+        /// desktop and enigo's path is the right one.
+        fn scroll(&mut self, amount: i32, axis: Axis) -> Result<()> {
+            let axis = match axis {
+                Axis::Vertical => EnigoAxis::Vertical,
+                Axis::Horizontal => EnigoAxis::Horizontal,
+            };
+            self.enigo
+                .scroll(amount, axis)
+                .map_err(|error| anyhow!("cannot scroll: {error}"))
+        }
+
+        /// Windows answers where the pointer is, which is what keeps the
+        /// corner kill switch armed here as it is on X11 and macOS.
+        fn cursor(&mut self) -> Result<(f64, f64)> {
+            let (x, y) = read_cursor()?;
+            Ok((f64::from(x), f64::from(y)))
+        }
+
+        /// Move one pixel and ask Windows whether it happened.
+        ///
+        /// Both directions are tried for the same reason X11 tries both: a
+        /// pointer already parked on the right edge cannot go further
+        /// right, and reporting that as a failure would blame the tool for
+        /// where the mouse happened to be sitting.
+        ///
+        /// Here the edge does not clamp, it **refuses** — one pixel past
+        /// the desktop is not a point, and `place` says so. So a refusal
+        /// from the first direction is exactly what the second direction
+        /// exists for, and it is carried rather than propagated: only a
+        /// pointer that moves neither way has failed.
+        fn probe(&mut self) -> Result<()> {
+            let from = read_cursor()?;
+            let mut refused = None;
+            for step in [1, -1] {
+                match Self::nudge(from, step) {
+                    Ok(true) => return Ok(()),
+                    Ok(false) => {}
+                    Err(error) => refused = Some(error),
+                }
+            }
+            if let Some(error) = refused {
+                return Err(error.context(
+                    "the cursor could not be moved in either direction to prove injection works",
+                ));
+            }
+            bail!(
+                "the cursor did not move: Windows accepted the event and the pointer \
+                 stayed at ({}, {}). Something holds the input desktop — a higher-integrity \
+                 window with focus is the usual cause, and no permission exists that would \
+                 change that",
+                from.0,
+                from.1
+            )
         }
     }
 }

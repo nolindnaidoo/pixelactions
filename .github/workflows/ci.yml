@@ -20,11 +20,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS and Linux are the supported platforms; Windows builds the
-        # platform-free core and proves nothing platform-specific leaked
-        # into it. Injection is exercised in the `xvfb` job below and
-        # nowhere else — it needs a display server, and everything else
-        # here runs headless.
+        # Every supported platform runs the same three gates. What a runner
+        # cannot prove is injection: it needs a display server and a desktop
+        # to send to. X11 is the one platform whose server runs in CI, so
+        # the `xvfb` job below is the only place a synthetic event is
+        # actually posted; macOS and Windows are verified by hand on real
+        # hardware, per AGENTS.md, and claimed no further than that.
         os: [macos-15, ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:

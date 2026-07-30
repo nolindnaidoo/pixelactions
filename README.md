@@ -44,10 +44,11 @@ best executor in this category and give it away.
 
 ## Status
 
-**Early.** The loop works end to end on **macOS** and on **Linux**, both
-Wayland (GNOME and KDE) and X11: resolve a label to its click point,
-re-locate it against a fresh capture, act, and confirm. Windows is next;
-no crate or binaries are published yet.
+**Early.** The loop works end to end on **macOS**, **Windows**, and
+**Linux** — both Wayland (GNOME and KDE) and X11: resolve a label to its
+click point, re-locate it against a fresh capture, act, and confirm. That
+is every platform this tool set out to cover; no crate or binaries are
+published yet.
 
 ## Install
 
@@ -80,6 +81,12 @@ refusal.
 
 - **macOS** asks for an Accessibility grant on first run. It attaches to
   the terminal that launches pixelactions, not to the binary.
+- **Windows** asks for nothing — there is no grant, and nothing to
+  install. What it has instead is a limit no permission lifts: **UIPI**.
+  A process at medium integrity cannot send input to a window running
+  elevated, to the UAC dialog, or to the login screen. Run the target
+  unelevated, or run pixelactions elevated too; `doctor` reports which of
+  the two you are, so the answer is a fact rather than a warning.
 - **Linux/Wayland** asks you to share a screen, once. The grant is
   remembered in `$XDG_STATE_HOME/pixelactions/`, so later runs do not
   prompt. Sharing is not optional: exact pointer placement is measured
@@ -197,16 +204,22 @@ instead of the two we could afford to embed.
 | Platform | State |
 |----------|-------|
 | macOS | Supported — the loop works end to end; primary development platform |
+| Windows | Supported — `SendInput` across the whole virtual desktop, kill switch included. One limit: UIPI — see above |
 | Linux (X11) | Supported — XTEST in root-window pixels, kill switch included |
 | Linux (Wayland) | Supported on GNOME and KDE, via the portal + EIS path. One caveat: no kill switch — see below |
-| Windows | Next — the goal is the same flow file running unmodified |
 
 Verified by running the loop, not by reading docs. On Wayland: a region
 marked in pixelcoords on GNOME 46, relocated, clicked, and the
 application reacted — placement exact, a rectangle dragged at (82, 328)
 recorded as (82, 328). On X11: a marked calculator key clicked from an
 unfocused window, then `esc`, `×3` and `enter` producing `7×3 = 21` —
-which also proves off-layout typing, since `×` is on no US layout.
+which also proves off-layout typing, since `×` is on no US layout. On
+Windows 11, a 3440×1440 desktop: placement measured by reading the cursor
+back at (0, 0), mid-screen, and (3439, 1439) — the last pixel, which is
+exactly the one the `65535 ÷ dimension` off-by-one makes unreachable —
+exact at all three; a click landing on a button and the application
+reacting; `ö` and `×` typed on a US layout; `ctrl+a`, `ctrl+shift+k` and
+the arrow keys arriving as chords rather than as characters.
 
 **Which Linux path you get is a runtime answer**, decided from the
 session, because the same binary faces either one. Injecting through

@@ -18,6 +18,8 @@ mod run;
 mod serve;
 mod session;
 mod verify;
+#[cfg(target_os = "windows")]
+mod win;
 
 use anyhow::Result;
 use clap::Parser;
@@ -31,6 +33,16 @@ const EXIT_MALFORMED: i32 = 2;
 pub const EXIT_REFUSED: i32 = 3;
 
 fn main() {
+    // Before anything asks Windows about a coordinate. A process that is
+    // not per-monitor-v2 aware is handed coordinates virtualized against
+    // the primary monitor's scale, so on a mixed-DPI desktop the numbers
+    // the OS reports and the pixels pixelcoords recorded would be different
+    // quantities — and pixelcoords declares the same awareness, in the same
+    // place, for the same reason. Idempotent and best-effort; `doctor`
+    // reports whether it actually holds.
+    #[cfg(target_os = "windows")]
+    let _ = win::become_dpi_aware();
+
     let cli = cli::Cli::parse();
     let result = match cli.command {
         cli::Command::Plan {
@@ -218,7 +230,18 @@ pub fn make_injector(
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Windows has one input path and no grant to negotiate, so this is as
+/// direct as macOS. What differs is underneath: the pointer goes out as
+/// `SendInput` across the virtual desktop rather than through enigo, which
+/// would address the primary monitor only.
+#[cfg(target_os = "windows")]
+pub fn make_injector(
+    _monitors: &[pixelcoords_core::session::MonitorRecord],
+) -> Result<Box<dyn inject::Injector>> {
+    Ok(Box::new(inject::WindowsInjector::new()?))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub fn make_injector(
     _monitors: &[pixelcoords_core::session::MonitorRecord],
 ) -> Result<Box<dyn inject::Injector>> {
