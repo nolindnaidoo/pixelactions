@@ -135,8 +135,214 @@ impl Injector for Recording {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use platform::RealInjector;
+
+/// Whether this build can synthesize input in the session it is running
+/// in, and if not, why not in terms the reader can act on.
+///
+/// A runtime question on Linux, where the same binary faces X11 or
+/// Wayland depending on the login session, so it cannot be a `cfg`.
+#[cfg(target_os = "linux")]
+pub fn availability() -> Result<(), String> {
+    use pixelactions_core::display::{Server, detect};
+
+    let server = detect(
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("DISPLAY").ok().as_deref(),
+    );
+    match server {
+        Server::Wayland => {}
+        Server::X11 => {
+            return Err(
+                "this is an X11 session, and this build only synthesizes input on Wayland. \
+                 X11 support is tracked separately; `plan` works everywhere"
+                    .to_string(),
+            );
+        }
+        Server::Unknown => {
+            return Err(
+                "no desktop session was found — neither XDG_SESSION_TYPE, WAYLAND_DISPLAY \
+                 nor DISPLAY names one. Synthesizing input needs a compositor to send it \
+                 to; `plan` works without one"
+                    .to_string(),
+            );
+        }
+    }
+    let capabilities = crate::portal::capabilities()
+        .map_err(|error| format!("cannot ask the desktop portal what it supports: {error:#}"))?;
+    if !capabilities.usable() {
+        return Err(format!(
+            "this compositor cannot grant input: the portal offers RemoteDesktop version {} \
+             (needs 2 or newer for ConnectToEIS), device types {:#b} (needs keyboard and \
+             pointer), ScreenCast version {}. GNOME and KDE implement this; wlroots \
+             compositors do not yet",
+            capabilities.remote_desktop_version,
+            capabilities.device_types,
+            capabilities.screen_cast_version
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn availability() -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    Err("input synthesis is not implemented for this platform yet — `plan` works everywhere".into())
+}
+
+/// Wayland: the portal grants, EIS carries, and the coordinate space is a
+/// region the compositor chose.
+///
+/// The structure differs from every other platform for one reason worth
+/// stating: this injector must hold state. Elsewhere a coordinate is
+/// absolute in a space known at compile time, so an injector is
+/// stateless. Here the space is a **granted region**, learned at runtime,
+/// so the monitors and the grant have to live alongside the socket — and
+/// the grant must outlive every event sent through it, or the compositor
+/// revokes the session mid-run.
+#[cfg(target_os = "linux")]
+mod platform {
+    use anyhow::{Result, anyhow, bail};
+    use pixelactions_core::flow::Axis;
+    use pixelactions_core::stream::place;
+    use pixelcoords_core::session::MonitorRecord;
+
+    use super::{Button, Injector};
+    use crate::{eis, portal};
+
+    pub struct RealInjector {
+        sender: eis::Sender,
+        monitors: Vec<MonitorRecord>,
+        /// Never read, never dropped early. The portal ties the session's
+        /// life to this handle; releasing it kills the EIS socket.
+        _grant: portal::Grant,
+    }
+
+    impl RealInjector {
+        /// Negotiate consent and connect. The monitors come from the
+        /// session because the physical pixels a flow resolves to mean
+        /// nothing without them.
+        pub fn new(monitors: &[MonitorRecord]) -> Result<Self> {
+            let mut grant = portal::grant()?;
+            let sender = eis::Sender::connect(grant.take_socket()?)?;
+            Ok(Self {
+                sender,
+                monitors: monitors.to_vec(),
+                _grant: grant,
+            })
+        }
+
+        /// Whether typing is possible in this grant.
+        pub fn can_type(&self) -> bool {
+            self.sender.can_type()
+        }
+
+        /// How the compositor described the area it will accept
+        /// coordinates in — for `doctor`, which reports it rather than
+        /// making the reader guess why a click was refused.
+        pub fn regions(&self) -> &[pixelactions_core::stream::Region] {
+            self.sender.regions()
+        }
+    }
+
+    impl Injector for RealInjector {
+        /// Takes physical pixels, like every other platform on Linux, and
+        /// does the last hop here because only this layer knows the
+        /// granted regions. The arithmetic itself is in core, tested.
+        fn move_to(&mut self, x: f64, y: f64) -> Result<()> {
+            let placement = place(
+                &self.monitors,
+                self.sender.regions(),
+                x.round() as i32,
+                y.round() as i32,
+            )
+            .map_err(|error| anyhow!("cannot place the pointer: {error}"))?;
+            self.sender.move_to(placement)
+        }
+
+        fn click(&mut self, button: Button) -> Result<()> {
+            self.press(button)?;
+            self.release(button)
+        }
+
+        fn double_click(&mut self, button: Button) -> Result<()> {
+            self.click(button)?;
+            // The compositor decides what counts as a double-click by
+            // timing, same as macOS; a short gap keeps both inside its
+            // window without relying on one frame carrying both.
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            self.click(button)
+        }
+
+        fn press(&mut self, button: Button) -> Result<()> {
+            match button {
+                Button::Left => self.sender.button(true),
+            }
+        }
+
+        fn release(&mut self, button: Button) -> Result<()> {
+            match button {
+                Button::Left => self.sender.button(false),
+            }
+        }
+
+        fn text(&mut self, text: &str) -> Result<()> {
+            self.sender.text(text)
+        }
+
+        fn chord(&mut self, chord: &str) -> Result<()> {
+            self.sender.chord(chord)
+        }
+
+        fn scroll(&mut self, amount: i32, axis: Axis) -> Result<()> {
+            self.sender.scroll(amount, axis)
+        }
+
+        /// Wayland has no "where is the pointer" query, by design — the
+        /// isolation that makes injection require consent also means no
+        /// client may ask where another client's pointer is.
+        ///
+        /// This returns an error rather than a plausible number on
+        /// purpose. The caller is the kill switch, and its contract is
+        /// that a cursor it cannot read fails the step naming
+        /// `failsafe = false`. A stubbed (0, 0) would sit in a screen
+        /// corner and abort every run; any other stub would silently
+        /// disable the check. Reporting the truth lets the existing guard
+        /// do the right thing.
+        ///
+        /// Lifting this needs the screencast stream's cursor metadata,
+        /// which is a `PipeWire` connection this build does not open.
+        fn cursor(&mut self) -> Result<(f64, f64)> {
+            bail!(
+                "Wayland exposes no way to ask where the pointer is — the same isolation \
+                 that makes input injection require your consent also hides the pointer \
+                 from other programs. The corner kill switch therefore has nothing to \
+                 watch on this platform. Set failsafe = false in the flow to run without \
+                 it, deliberately"
+            )
+        }
+
+        /// Prove the grant, honestly.
+        ///
+        /// Reaching here at all means the portal granted a session, the
+        /// compositor offered a pointer that takes coordinates, and it
+        /// gave that pointer a region — which is everything that can be
+        /// established without a way to read the cursor back. It is
+        /// deliberately *not* the one-pixel move macOS does, because with
+        /// no cursor query there would be nothing to compare against, and
+        /// "it did not error" is not "it moved".
+        fn probe(&mut self) -> Result<()> {
+            if self.sender.regions().is_empty() {
+                bail!("the compositor granted input but described no region to aim in");
+            }
+            Ok(())
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod platform {

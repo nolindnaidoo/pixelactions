@@ -6,6 +6,89 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## 0.2.0 — unreleased
+
+**Linux/Wayland**, through the sanctioned path: xdg-desktop-portal
+`RemoteDesktop` linked to a `ScreenCast` session, acting over EIS. The
+same flow file that runs on macOS runs here, with one deliberate
+exception noted under the kill switch below.
+
+Wayland forbids cross-client input injection by design, so unlike every
+other platform this is a negotiation rather than a call: the user
+consents once, and the grant is remembered.
+
+### How it works
+
+- **Consent is asked once, at setup time.** `SelectDevices` is sent with
+  `persist_mode = 2` and the `restore_token` from `Start` is stored under
+  `$XDG_STATE_HOME/pixelactions/wayland-restore-token`, then replayed on
+  later runs. A dialog appearing mid-run would be worse than a refusal —
+  a flow half-executes while a human is asked a question they are not
+  there to answer — so the prompt belongs to the first
+  `doctor --probe`.
+- **A linked screen share is mandatory, not optional.** Absolute pointer
+  placement is only meaningful inside a region the compositor grants, and
+  it derives those regions from the shared streams. Cancelling that half
+  of the grant is refused rather than silently degraded to relative
+  motion.
+- **The region comes from EIS, not from PipeWire.** The shared stream is
+  what causes the region to exist, but its geometry arrives on the EI
+  device — so exact placement needs no PipeWire connection. Verified
+  against GNOME 46, which reports the region and its scale directly.
+- **Typing goes through the compositor's own keymap.** There is no
+  temporary-remap trick on Wayland the way there is on X11, so a
+  character the active layout cannot reach is refused **by name** rather
+  than typed as something else.
+- **No async runtime**, as everywhere else in this tool: the portal
+  handshake uses zbus's blocking API, and `reis`'s core is synchronous.
+
+### The kill switch is refused, not faked
+
+Wayland exposes no way to ask where the pointer is — the same isolation
+that makes injection require consent also hides the pointer from other
+programs. The corner kill switch therefore has nothing to watch.
+
+This is reported rather than worked around. `failsafe` is on by default,
+and a cursor that cannot be read **fails the step** naming
+`failsafe = false`, which is the existing, tested behavior. So a flow
+run on Wayland must opt out of the kill switch **deliberately**:
+
+```toml
+[settings]
+failsafe = false
+```
+
+Degraded safety is a choice the flow author makes in writing, never a
+silent default. A stubbed cursor position was rejected outright: `(0, 0)`
+sits in a screen corner and would abort every run, and any other stub
+would disable the check while appearing to keep it.
+
+Lifting this needs the shared stream's cursor metadata, which is a
+PipeWire connection this release does not open. `doctor` reports whether
+the compositor offers that metadata, so the gap is visible.
+
+### Also
+
+- `doctor` reports the display server, the chosen input path, the portal's
+  `RemoteDesktop` and `ScreenCast` versions and device types, whether a
+  grant is remembered, and whether cursor metadata exists.
+- `doctor --probe` distinguishes **accepted** from **confirmed**. On macOS
+  the cursor is read back, so a probe is a proof; on Wayland the
+  compositor accepts a placement and offers no way to check it, and the
+  report says so rather than claiming a proof it does not have. The JSON
+  gains a `confirmed` field alongside `moved` — the same distinction the
+  run report draws between *executed* and *verified*.
+- An X11 session is **refused** rather than half-served. Injecting through
+  XWayland would reach X clients only, so the pointer would travel over
+  native windows that never receive the events — a run that clicks
+  through some windows and not others while reporting success. `plan`
+  works on every session type, as always.
+- New in `pixelactions-core`: `stream` (placing a physical pixel in a
+  granted region, property-tested over mixed DPI, multiple outputs and
+  negative origins) and `display` (deciding the display server from the
+  environment, tested against every session shape).
+- Building on Linux needs `libxkbcommon-dev`.
+
 ## 0.1.0
 
 The first release. The loop works end to end on **macOS**: resolve a

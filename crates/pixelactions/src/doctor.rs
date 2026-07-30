@@ -86,7 +86,31 @@ struct Report {
     capabilities: Capabilities,
     /// macOS only: whether this process may post synthetic events.
     accessibility_trusted: Option<bool>,
+    /// Linux only: which display server this session runs and what its
+    /// portal will grant. `None` elsewhere, where the windowing system is
+    /// a compile-time fact and there is nothing to discover.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    linux: Option<LinuxStatus>,
     probe: Probe,
+}
+
+/// What a Linux session can actually do, discovered rather than assumed.
+#[derive(Debug, Serialize)]
+struct LinuxStatus {
+    server: pixelactions_core::display::Server,
+    /// Which path input would take, named so a bug report can say it.
+    /// `none` means this session has no path at all.
+    rung: &'static str,
+    portal_remote_desktop_version: u32,
+    portal_screen_cast_version: u32,
+    /// Bitmask: 1 keyboard, 2 pointer, 4 touchscreen.
+    portal_device_types: u32,
+    /// Whether the compositor could report the pointer position through
+    /// screencast metadata. Reported because it is exactly what a Wayland
+    /// kill switch would need, and this build does not yet consume it.
+    cursor_metadata_available: bool,
+    /// Whether a previous grant was stored, so no dialog is expected.
+    grant_remembered: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,11 +127,18 @@ struct Capabilities {
     verify: bool,
 }
 
-/// What the probe found, when it ran. `None` means it was not asked for.
+/// What the probe found, when it ran.
+///
+/// `moved` and `confirmed` are separate because on Wayland they genuinely
+/// differ: the compositor accepts a placement and offers no way to ask
+/// where the pointer ended up. Collapsing them would make `doctor` claim
+/// a proof it does not have — the same distinction the run report draws
+/// between "executed" and "verified".
 #[derive(Debug, Serialize)]
 struct Probe {
     attempted: bool,
     moved: bool,
+    confirmed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
 }
@@ -136,21 +167,27 @@ fn pixelcoords_status() -> PixelcoordsStatus {
 
 pub fn run(json: bool, probe: bool) -> Result<i32> {
     let probe_result = run_probe(probe);
+    // One question, asked once: can this session synthesize input? Both
+    // the headline and the capability line come from the same answer, so
+    // they cannot disagree.
+    let can_inject = crate::inject::availability();
     let report = Report {
         schema: 1,
         platform: std::env::consts::OS,
-        supported_platform: cfg!(target_os = "macos"),
+        supported_platform: can_inject.is_ok(),
         native_space: pixelactions_core::convert::native_space(),
         session_schema_supported: SUPPORTED_SCHEMA,
         pixelcoords: pixelcoords_status(),
         capabilities: Capabilities {
             resolve: true,
-            inject: cfg!(target_os = "macos"),
+            inject: can_inject.is_ok(),
             verify: true,
         },
         accessibility_trusted: trusted(),
+        linux: linux_status(),
         probe: probe_result,
     };
+    let refusal = can_inject.err();
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -161,11 +198,16 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
     println!(
         "supported:       {}",
         if report.supported_platform {
-            "yes"
+            "yes".to_string()
         } else {
-            "not yet — macOS only in this build"
+            // The reason, not a generic no: every refusal here is
+            // something the reader can act on.
+            format!("no — {}", refusal.as_deref().unwrap_or("unsupported"))
         }
     );
+    if let Some(linux) = &report.linux {
+        print_linux(linux);
+    }
     println!("native space:    {:?}", report.native_space);
     println!(
         "session schema:  {} and older",
@@ -186,27 +228,125 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
     println!();
     println!("capabilities:");
     println!("  resolve a plan   yes");
-    println!(
-        "  inject input     {}",
-        if report.capabilities.inject {
-            "yes — needs macOS Accessibility permission"
-        } else {
-            "no  — macOS only in this build"
-        }
-    );
+    println!("  inject input     {}", inject_line(&report));
     println!("  verify a step    yes — via pixelcoords find");
     if report.probe.attempted {
         println!();
-        match (&report.probe.moved, &report.probe.detail) {
-            (true, _) => println!("probe:           the cursor moved — input permission is real"),
-            (false, Some(detail)) => println!("probe:           FAILED\n  {detail}"),
-            (false, None) => println!("probe:           failed, no detail"),
+        match (
+            report.probe.moved,
+            report.probe.confirmed,
+            &report.probe.detail,
+        ) {
+            (true, true, _) => {
+                println!("probe:           the cursor moved — input permission is real");
+            }
+            // Wayland: granted and accepted, but unprovable from here.
+            (true, false, detail) => {
+                println!("probe:           input was granted and accepted, NOT confirmed");
+                if let Some(detail) = detail {
+                    println!("  {detail}");
+                }
+            }
+            (false, _, Some(detail)) => println!("probe:           FAILED\n  {detail}"),
+            (false, _, None) => println!("probe:           failed, no detail"),
         }
     }
     if report.probe.attempted && !report.probe.moved {
         return Ok(3);
     }
     Ok(0)
+}
+
+/// One line naming what a grant costs on this platform, since the answer
+/// differs in kind: macOS asks once in System Settings, Wayland asks the
+/// user per grant and remembers it.
+fn inject_line(report: &Report) -> String {
+    if !report.capabilities.inject {
+        return "no".to_string();
+    }
+    let Some(linux) = &report.linux else {
+        return "yes — needs macOS Accessibility permission".to_string();
+    };
+    let grant = if linux.grant_remembered {
+        "a remembered screen-share grant"
+    } else {
+        "a screen-share grant you approve once"
+    };
+    format!("yes — via {} using {grant}", linux.rung)
+}
+
+fn print_linux(linux: &LinuxStatus) {
+    println!("session:         {}", linux.server.name());
+    println!("input path:      {}", linux.rung);
+    println!(
+        "portal:          RemoteDesktop v{} · ScreenCast v{} · devices {:#b}",
+        linux.portal_remote_desktop_version,
+        linux.portal_screen_cast_version,
+        linux.portal_device_types
+    );
+    println!(
+        "grant:           {}",
+        if linux.grant_remembered {
+            "remembered — no dialog expected"
+        } else {
+            "not yet given — the first run will ask"
+        }
+    );
+    println!(
+        "kill switch:     {}",
+        if linux.cursor_metadata_available {
+            "no eyes on Wayland in this build (the compositor could provide them)"
+        } else {
+            "no eyes on Wayland, and this compositor offers no cursor metadata"
+        }
+    );
+}
+
+/// What this Linux session offers. `None` off Linux.
+#[cfg(target_os = "linux")]
+fn linux_status() -> Option<LinuxStatus> {
+    use pixelactions_core::display::{Server, detect};
+
+    let server = detect(
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("DISPLAY").ok().as_deref(),
+    );
+    // Asking the portal is cheap and prompts nothing, but it is only
+    // meaningful on Wayland; an X11 session has a different path entirely.
+    let portal = match server {
+        Server::Wayland => crate::portal::capabilities().ok(),
+        _ => None,
+    };
+    let Some(portal) = portal else {
+        return Some(LinuxStatus {
+            server,
+            rung: "none",
+            portal_remote_desktop_version: 0,
+            portal_screen_cast_version: 0,
+            portal_device_types: 0,
+            cursor_metadata_available: false,
+            grant_remembered: false,
+        });
+    };
+    Some(LinuxStatus {
+        server,
+        rung: if portal.usable() {
+            "portal RemoteDesktop + EIS"
+        } else {
+            "none"
+        },
+        portal_remote_desktop_version: portal.remote_desktop_version,
+        portal_screen_cast_version: portal.screen_cast_version,
+        portal_device_types: portal.device_types,
+        cursor_metadata_available: portal.cursor_metadata(),
+        grant_remembered: portal.have_stored_token,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_status() -> Option<LinuxStatus> {
+    None
 }
 
 /// Whether this process may post synthetic events. `None` off macOS,
@@ -229,6 +369,7 @@ fn run_probe(requested: bool) -> Probe {
         return Probe {
             attempted: false,
             moved: false,
+            confirmed: false,
             detail: None,
         };
     }
@@ -241,6 +382,7 @@ fn run_probe(requested: bool) -> Probe {
         return Probe {
             attempted: true,
             moved: false,
+            confirmed: false,
             detail: Some(
                 "Accessibility is not granted to the application running pixelactions, \
                  so synthetic events would be discarded silently. A system dialog was \
@@ -260,22 +402,90 @@ fn run_probe(requested: bool) -> Probe {
         Ok(()) => Probe {
             attempted: true,
             moved: true,
+            // macOS can be asked where the cursor ended up, so this is a
+            // real proof rather than an acceptance.
+            confirmed: true,
             detail: None,
         },
         Err(error) => Probe {
             attempted: true,
             moved: false,
+            confirmed: false,
             detail: Some(format!("{error:#}")),
         },
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// On Wayland the probe is where the consent dialog belongs: at setup
+/// time, answered by a human who is present, rather than in the middle of
+/// a run that is not being watched.
+///
+/// What it can establish: the portal granted a session, the compositor
+/// offered a pointer that takes coordinates, and it described a region to
+/// aim inside. What it cannot: that the pointer moved — nothing on Wayland
+/// will say. That gap is reported rather than papered over.
+#[cfg(target_os = "linux")]
+fn run_probe(requested: bool) -> Probe {
+    if !requested {
+        return Probe {
+            attempted: false,
+            moved: false,
+            confirmed: false,
+            detail: None,
+        };
+    }
+    if let Err(reason) = crate::inject::availability() {
+        return Probe {
+            attempted: true,
+            moved: false,
+            confirmed: false,
+            detail: Some(reason),
+        };
+    }
+    // No monitors: the probe never places a pointer, so it needs no
+    // session. Anything that does need one refuses without it.
+    let outcome = crate::inject::RealInjector::new(&[]).and_then(|mut injector| {
+        use crate::inject::Injector;
+        injector.probe().map(|()| {
+            let regions = injector.regions().len();
+            let typing = injector.can_type();
+            (regions, typing)
+        })
+    });
+    match outcome {
+        Ok((regions, typing)) => Probe {
+            attempted: true,
+            moved: true,
+            confirmed: false,
+            detail: Some(format!(
+                "the compositor granted input and described {regions} region(s); typing is \
+                 {}. Whether the pointer moved cannot be checked — Wayland exposes no way \
+                 to ask where it is, which is also why the corner kill switch has nothing \
+                 to watch here",
+                if typing {
+                    "available"
+                } else {
+                    "unavailable (no keymap was sent)"
+                }
+            )),
+        },
+        Err(error) => Probe {
+            attempted: true,
+            moved: false,
+            confirmed: false,
+            detail: Some(format!("{error:#}")),
+        },
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn run_probe(requested: bool) -> Probe {
     Probe {
         attempted: requested,
         moved: false,
-        detail: requested.then(|| "input synthesis is macOS-only in this build".to_string()),
+        confirmed: false,
+        detail: requested
+            .then(|| "input synthesis is not implemented for this platform yet".to_string()),
     }
 }
 

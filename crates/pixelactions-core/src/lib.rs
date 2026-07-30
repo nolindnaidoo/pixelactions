@@ -16,8 +16,10 @@
 
 pub mod chord;
 pub mod convert;
+pub mod display;
 pub mod flow;
 pub mod plan;
 pub mod protocol;
 pub mod report;
+pub mod stream;
 pub mod verb;
