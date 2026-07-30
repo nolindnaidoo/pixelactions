@@ -1,6 +1,6 @@
 [package]
 name = "pixelactions"
-description = "Execute desktop interactions from pixelcoords sessions: resolve a labeled region, act at the verified point, confirm it landed"
+description = "Execute desktop interactions from pixelcoords sessions: resolve a labeled region, act at the verified point, confirm it landed. Cross-platform mouse and keyboard automation for macOS, Windows, and Linux (X11 and Wayland)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,8 +18,17 @@ repository.workspace = true
 # actually wants. pixelactions-core leaves it unset on purpose: it IS a
 # library, its docs.rs build is green, and the default link is correct.
 documentation = "https://github.com/nolindnaidoo/pixelactions/blob/main/docs/CLI.md"
-keywords.workspace = true
-categories.workspace = true
+# The tool's five slots, chosen against what each keyword page actually
+# contains. `input` and `desktop` are gone — the first is crossterm and
+# gamepads, the second is app frameworks like dioxus. `desktop-automation`
+# replaces both: the browse page is exact-match, but free-text search
+# splits the hyphen, so it also answers the query "desktop automation".
+# `rpa` is the industry's own word for this and the page uiautomation
+# sits on; `mouse` is the page enigo and rdev sit on. `testing` is 2000+
+# crates deep and unrankable as a keyword — it earns its place as a
+# category instead.
+keywords = ["automation", "desktop-automation", "rpa", "computer-use", "mouse"]
+categories = ["command-line-utilities", "development-tools", "development-tools::testing"]
 
 [dependencies]
 pixelactions-core = { path = "../pixelactions-core", version = "0.4.0" }

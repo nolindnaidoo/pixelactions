@@ -11,8 +11,12 @@ readme = "README.md"
 authors = ["Nolin D Naidoo"]
 homepage = "https://pixelactions.dev"
 repository = "https://github.com/nolindnaidoo/pixelactions"
-keywords = ["automation", "coordinates", "input", "desktop", "testing"]
-categories = ["command-line-utilities", "development-tools"]
+# keywords / categories are deliberately NOT inherited: the binary and the
+# library are found by different searches. Someone typing `cargo install`
+# wants a desktop automation tool; someone typing `[dependencies]` wants
+# the coordinate-space conversion. Sharing one set meant the library sat
+# under `command-line-utilities`, which it is not. Set per-crate — see each
+# package manifest. (Same rule as pixelcoords.)
 
 [profile.release]
 strip = true
