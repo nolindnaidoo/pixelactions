@@ -132,3 +132,11 @@ Wayland is a differentiator to earn, not a gate to pass. pixelcoords'
 own Wayland capture looked impossible until the portal path worked; the
 same patience applies here, and shipping three platforms first is what
 funds that patience with real users.
+
+> **0.2.0 update:** rung one of the Wayland ladder (portal `RemoteDesktop`
+> + EIS on GNOME and KDE) shipped ahead of Windows and X11 — the
+> developer moved to a Linux desktop and the platform under one's hands
+> is the one that gets exercised. The ladder itself is unchanged;
+> `zwlr_virtual_pointer_v1` and the uinput rung remain future work,
+> tracked in the Wayland issue. See `07-MILESTONES.md` for the current
+> ordering.
