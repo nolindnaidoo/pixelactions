@@ -1,9 +1,10 @@
 # Contributing
 
-Thanks for your interest. pixelactions runs verified on **macOS only**
-right now — Windows and X11 are the next milestone — so the most
-valuable contributions are bug reports from real machines, small focused
-fixes, and the platform work itself.
+Thanks for your interest. pixelactions runs verified on **macOS** and on
+**Linux under Wayland** (GNOME and KDE, via the portal + EIS path) right
+now — X11 and Windows are the next milestones — so the most valuable
+contributions are bug reports from real machines, small focused fixes,
+and the platform work itself.
 
 This tool moves a real mouse and keyboard. That raises the bar on
 verification: see the definition of done in
