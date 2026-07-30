@@ -132,7 +132,10 @@ is granted.
 
 On **Linux** it also reports what had to be discovered rather than
 assumed, because the same binary faces a different windowing system
-depending on which session you logged into:
+depending on which session you logged into. The two servers report
+different things, because they have different things to report.
+
+Wayland:
 
 ```
 platform:        linux
@@ -145,13 +148,43 @@ kill switch:     no eyes on Wayland in this build (the compositor could provide 
 native space:    Physical
 ```
 
-`session` is the display server, `input path` is how events would be
-sent (`none` if this session has no path at all), `portal` is what
-xdg-desktop-portal offers — `RemoteDesktop` must be v2 or newer for
-`ConnectToEIS` — and `grant` says whether a remembered screen share means
-no dialog. When input is unavailable, `supported` gives the reason
-instead of a bare "no", so an X11 session or a compositor without the
-portal says which it is.
+X11:
+
+```
+platform:        linux
+supported:       yes
+session:         x11
+input path:      XTEST on the root window
+display:         :0 — connected
+grant:           none needed — any X client may inject into any other, which is the hole Wayland closes
+kill switch:     armed — X11 reports the pointer position, so the corner check works
+native space:    Physical
+```
+
+`session` is the display server and `input path` is how events would be
+sent (`none` if this session has no path at all). After that the lines
+diverge:
+
+- **X11** reports `display` — which display was tried and whether it
+  answered, since both X11 failure modes are environmental — and no
+  portal line at all. In `--json` those fields are **absent** rather than
+  zero: a `portal_remote_desktop_version` of `0` would read as "the portal
+  answered and said zero", which is a different and untrue thing.
+
+  `supported` on X11 means **a server answered**, not merely that the
+  session calls itself X11 — the check connects, because naming a session
+  proves nothing about a server being on the other end of `DISPLAY`.
+  Connecting costs a local socket round trip, prompts nobody and grants
+  nothing, which is the whole X11 security story in one sentence. So `run`
+  and `serve` refuse a dead display up front with exit 3 and the reason,
+  instead of claiming support and failing later.
+- **Wayland** reports `portal`, what xdg-desktop-portal offers
+  (`RemoteDesktop` must be v2 or newer for `ConnectToEIS`), and whether a
+  remembered screen share means no dialog.
+
+When input is unavailable, `supported` gives the reason instead of a bare
+"no", so a session with no display server, or a compositor without the
+portal, says which it is.
 
 `run` and `serve` enforce that minimum themselves before doing anything,
 exiting 3 with the reason. It is not advisory: below the minimum,
@@ -170,6 +203,16 @@ proves nothing. If the grant is missing, the probe asks macOS for it,
 which raises the system dialog and adds the calling application to the
 Accessibility list.
 
+On **X11** it does the same thing, for the same reason it can: X11 will
+answer where the pointer is. `XSync` alone would prove only that the
+server *processed* a fake event, which is not the same as having acted on
+it. Both directions are tried, because X11 clamps a move to the screen and
+a pointer parked on the right edge cannot go further right:
+
+```
+probe:           the cursor moved, and the OS confirmed where it went
+```
+
 On **Wayland** it performs the real grant and reports what that
 established — a pointer that takes coordinates, and a region to aim
 inside — then says plainly that placement is **not confirmed**, because
@@ -180,14 +223,15 @@ probe:           input was granted and accepted, NOT confirmed
 ```
 
 The JSON carries this as `moved` and `confirmed` separately: `moved` is
-"the compositor accepted it", `confirmed` is "the OS proved it". Only
-macOS can currently set both. It is the same distinction a run report
-draws between `executed` and `verified` — "nothing errored" is not "it
-worked".
+"the platform accepted it", `confirmed` is "the OS proved it". macOS and
+X11 set both; Wayland cannot set the second. It is the same distinction a
+run report draws between `executed` and `verified` — "nothing errored" is
+not "it worked".
 
 Exits 3 when the probe fails outright; an accepted-but-unconfirmed probe
 exits 0, because the grant genuinely works.
 
-**The grant attaches to the application that launched pixelactions**,
-not to the binary — a CLI inherits its terminal's permission. There will
-never be a "pixelactions" entry in the Accessibility list.
+On macOS, **the grant attaches to the application that launched
+pixelactions**, not to the binary — a CLI inherits its terminal's
+permission. There will never be a "pixelactions" entry in the
+Accessibility list. X11 has no grant to attach to anything.

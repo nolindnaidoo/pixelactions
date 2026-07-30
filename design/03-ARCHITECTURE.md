@@ -140,3 +140,10 @@ funds that patience with real users.
 > `zwlr_virtual_pointer_v1` and the uinput rung remain future work,
 > tracked in the Wayland issue. See `07-MILESTONES.md` for the current
 > ordering.
+>
+> **0.3.0 update:** X11 followed, for the same reason and from the same
+> desktop, leaving Windows as the one platform still unbuilt. The row
+> above held exactly: XTEST needed no conversion at all. What the table
+> did not anticipate is that X11 turned out to be the platform with the
+> *fewest* caveats of the three — the kill switch works there and nowhere
+> else on Linux, because X11 will say where the pointer is.

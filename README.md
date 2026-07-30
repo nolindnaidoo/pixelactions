@@ -44,9 +44,9 @@ best executor in this category and give it away.
 
 ## Status
 
-**Early.** The loop works end to end on **macOS** and on **Linux under
-Wayland** (GNOME and KDE): resolve a label to its click point, re-locate
-it against a fresh capture, act, and confirm. X11 and Windows are next;
+**Early.** The loop works end to end on **macOS** and on **Linux**, both
+Wayland (GNOME and KDE) and X11: resolve a label to its click point,
+re-locate it against a fresh capture, act, and confirm. Windows is next;
 no crate or binaries are published yet.
 
 ## Install
@@ -66,17 +66,17 @@ binary for capture-time work — install both:
 cargo install pixelcoords pixelactions
 ```
 
-Building on Linux needs the xkbcommon headers, because typing means
-looking a character up in the compositor's own keymap:
+Building on Linux needs the xkbcommon headers, because typing on Wayland
+means looking a character up in the compositor's own keymap:
 
 ```bash
 sudo apt-get install -y libxkbcommon-dev pkg-config
 ```
 
-**The grant, per platform.** Either way,
-`pixelactions doctor --probe` proves what it can rather than assuming it,
-and is the right place to answer the prompt — a dialog appearing partway
-through an unattended run is worse than a refusal.
+**The grant, per platform.** `pixelactions doctor --probe` proves what it
+can rather than assuming it, and is the right place to answer any prompt —
+a dialog appearing partway through an unattended run is worse than a
+refusal.
 
 - **macOS** asks for an Accessibility grant on first run. It attaches to
   the terminal that launches pixelactions, not to the binary.
@@ -84,6 +84,13 @@ through an unattended run is worse than a refusal.
   remembered in `$XDG_STATE_HOME/pixelactions/`, so later runs do not
   prompt. Sharing is not optional: exact pointer placement is measured
   against the region the compositor grants with it.
+- **Linux/X11** asks nothing, because X11 has nothing to ask. Any client
+  may inject into any other — which is the hole Wayland closes, and worth
+  knowing about your own desktop rather than enjoying quietly. Nothing to
+  install beyond the build deps above.
+
+Which of the two Linux paths you get is decided from the session at
+runtime, not at build time; `doctor` names it.
 
 ## Three ways to drive it
 
@@ -190,13 +197,25 @@ instead of the two we could afford to embed.
 | Platform | State |
 |----------|-------|
 | macOS | Supported — the loop works end to end; primary development platform |
+| Linux (X11) | Supported — XTEST in root-window pixels, kill switch included |
 | Linux (Wayland) | Supported on GNOME and KDE, via the portal + EIS path. One caveat: no kill switch — see below |
-| Linux (X11) | Next — refused rather than half-served today |
 | Windows | Next — the goal is the same flow file running unmodified |
 
-Verified on Wayland by running the loop: a region marked in pixelcoords
-on GNOME 46, relocated, clicked, and the application reacted. Placement
-is exact — a rectangle dragged at (82, 328) recorded as (82, 328).
+Verified by running the loop, not by reading docs. On Wayland: a region
+marked in pixelcoords on GNOME 46, relocated, clicked, and the
+application reacted — placement exact, a rectangle dragged at (82, 328)
+recorded as (82, 328). On X11: a marked calculator key clicked from an
+unfocused window, then `esc`, `×3` and `enter` producing `7×3 = 21` —
+which also proves off-layout typing, since `×` is on no US layout.
+
+**Which Linux path you get is a runtime answer**, decided from the
+session, because the same binary faces either one. Injecting through
+XWayland on a Wayland session would reach X clients only, so the pointer
+would travel over native windows that never receive the events — a run
+that clicks through some windows and not others while reporting success.
+That is why the choice is made once, from `XDG_SESSION_TYPE` and the
+socket variables, and a session that cannot be named is refused rather
+than guessed at.
 
 **The Wayland caveat, stated plainly.** Wayland exposes no way to ask
 where the pointer is — the same isolation that makes injection require
@@ -215,10 +234,11 @@ appearing to keep it. `doctor` reports whether your compositor could
 supply the pointer position through screencast metadata, which is what
 lifting this needs.
 
-X11 is **refused**, not approximated: injecting through XWayland reaches
-X clients only, so the pointer would travel over native windows that
-never receive the events — a run that clicks through some windows and not
-others while reporting success. `plan` works on every session type.
+**X11 has no such caveat**, because X11 will tell you where the pointer
+is. The kill switch is armed by default there. What X11 does not have is
+a permission model of any kind: any client may inject into any other, so
+there is nothing to grant, and `doctor` says so rather than implying a
+guard exists.
 
 No crate or binaries are published yet. This table is kept honest —
 claims match runs.

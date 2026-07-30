@@ -1,10 +1,15 @@
 //! Input synthesis, behind a seam.
 //!
-//! One trait with two implementations: the real one that moves your
-//! mouse, and a recording one that moves nothing. The recorder is why
-//! the run loop — ordering, settling, verification, abort — is testable
-//! without a screen, which is the same justification `CaptureProvider`
-//! has in the sister tool.
+//! One trait, a recording implementation that moves nothing, and one real
+//! implementation per input path. The recorder is why the run loop —
+//! ordering, settling, verification, abort — is testable without a screen,
+//! which is the same justification `CaptureProvider` has in the sister
+//! tool.
+//!
+//! Linux is the platform with two real implementations rather than one,
+//! because the display server is a runtime fact there: [`X11Injector`]
+//! speaks XTEST, [`WaylandInjector`] speaks the portal and EIS, and
+//! [`session_server`] decides which the machine is actually running.
 //!
 //! **Coordinates arriving here are already converted.** `Space::Auto`
 //! resolves to logical points on macOS and physical pixels on
@@ -135,8 +140,32 @@ impl Injector for Recording {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "macos")]
 pub use platform::RealInjector;
+
+/// Linux has two real injectors because it has two display servers, and
+/// which one a machine runs is a runtime fact rather than a build-time one.
+/// They are named rather than hidden behind one `RealInjector` so a call
+/// site has to say which path it means.
+#[cfg(target_os = "linux")]
+pub use wayland::WaylandInjector;
+#[cfg(target_os = "linux")]
+pub use x11::X11Injector;
+
+/// Which display server this session is running.
+///
+/// One place reads the environment, so `availability`, `doctor` and the
+/// injector chosen for a run can never disagree about what they are looking
+/// at. The decision itself is in core, where it is tested against every
+/// session shape.
+#[cfg(target_os = "linux")]
+pub fn session_server() -> pixelactions_core::display::Server {
+    pixelactions_core::display::detect(
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("DISPLAY").ok().as_deref(),
+    )
+}
 
 /// Whether this build can synthesize input in the session it is running
 /// in, and if not, why not in terms the reader can act on.
@@ -145,27 +174,29 @@ pub use platform::RealInjector;
 /// Wayland depending on the login session, so it cannot be a `cfg`.
 #[cfg(target_os = "linux")]
 pub fn availability() -> Result<(), String> {
-    use pixelactions_core::display::{Server, detect};
+    use pixelactions_core::display::Server;
 
-    let server = detect(
-        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
-        std::env::var("DISPLAY").ok().as_deref(),
-    );
-    match server {
+    match session_server() {
         Server::Wayland => {}
+        // X11 has no permission model to check — any client may inject into
+        // any other, which is precisely the hole Wayland closes. So the only
+        // question is whether the display answers, and the honest way to
+        // find out is to connect: naming a session `x11` proves nothing
+        // about a server being on the other end of `DISPLAY`. Cheap enough
+        // to ask (a local socket, no prompt, nothing granted), and asking
+        // here is what makes a dead display a refusal — exit 3 with the
+        // reason — rather than a run that claims support and then fails
+        // while building the injector.
         Server::X11 => {
-            return Err(
-                "this is an X11 session, and this build only synthesizes input on Wayland. \
-                 X11 support is tracked separately; `plan` works everywhere"
-                    .to_string(),
-            );
+            return X11Injector::new()
+                .map(|_| ())
+                .map_err(|error| format!("{error:#}"));
         }
         Server::Unknown => {
             return Err(
                 "no desktop session was found — neither XDG_SESSION_TYPE, WAYLAND_DISPLAY \
-                 nor DISPLAY names one. Synthesizing input needs a compositor to send it \
-                 to; `plan` works without one"
+                 nor DISPLAY names one. Synthesizing input needs a display server to send \
+                 it to; `plan` works without one"
                     .to_string(),
             );
         }
@@ -194,6 +225,114 @@ pub fn availability() -> Result<(), String> {
     Err("input synthesis is not implemented for this platform yet — `plan` works everywhere".into())
 }
 
+/// Chord tokens → enigo keys, shared by every platform whose injector is
+/// enigo: macOS and X11 today, Windows when it lands.
+///
+/// One table, because a chord string is a portability promise. `cmd+s`
+/// written on a Mac has to press Super+s on Linux, and it does —
+/// `Key::Meta` is `Super_L` on X11 and `VK_LWIN` on Windows. A second copy
+/// of this table per platform is how that promise quietly stops being true.
+///
+/// Wayland cannot share it: an EI keyboard is addressed by keysym against
+/// the compositor's own keymap, not by enigo key, so `eis` carries the
+/// parallel table. Both are checked against
+/// [`pixelactions_core::chord::NAMED_KEYS`], which is what keeps them from
+/// drifting.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod keys {
+    use anyhow::{Context, Result, anyhow};
+    use enigo::Key;
+    use pixelactions_core::chord::NAMED_KEYS;
+
+    /// Map one chord token to an enigo key. Modifiers are named the way a
+    /// human writes them; anything else is a single character.
+    pub fn key_for(token: &str) -> Result<Key> {
+        let key = match token.to_ascii_lowercase().as_str() {
+            // Super is the Linux name for what a Mac calls cmd. The aliases
+            // exist so one flow file runs on both.
+            "cmd" | "command" | "meta" | "super" => Key::Meta,
+            "ctrl" | "control" => Key::Control,
+            "alt" | "option" | "opt" => Key::Alt,
+            "shift" => Key::Shift,
+            "tab" => Key::Tab,
+            "enter" | "return" => Key::Return,
+            "esc" | "escape" => Key::Escape,
+            "space" => Key::Space,
+            "backspace" | "delete" => Key::Backspace,
+            "up" => Key::UpArrow,
+            "down" => Key::DownArrow,
+            "left" => Key::LeftArrow,
+            "right" => Key::RightArrow,
+            other => {
+                let mut chars = other.chars();
+                let first = chars.next().context("empty key in chord")?;
+                if chars.next().is_some() {
+                    return Err(anyhow!(
+                        "unknown key {other:?} in chord — use a single character or one of: {}",
+                        NAMED_KEYS.join(", ")
+                    ));
+                }
+                Key::Unicode(first)
+            }
+        };
+        Ok(key)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The names in a chord are the same on every platform, which is
+        /// the whole point of writing them out rather than taking keycodes.
+        #[test]
+        fn modifier_names_map_the_way_a_human_writes_them() {
+            for name in ["cmd", "command", "meta", "super", "SUPER"] {
+                assert_eq!(key_for(name).expect(name), Key::Meta, "{name}");
+            }
+            for name in ["ctrl", "control"] {
+                assert_eq!(key_for(name).expect(name), Key::Control, "{name}");
+            }
+            for name in ["alt", "option", "opt"] {
+                assert_eq!(key_for(name).expect(name), Key::Alt, "{name}");
+            }
+        }
+
+        /// Every name core promises a flow author, answered here. A name
+        /// listed there and missing from this table is a chord that parses
+        /// and then fails at the injector, which is the worst place to find
+        /// out.
+        #[test]
+        fn every_promised_name_resolves() {
+            for name in NAMED_KEYS {
+                let key = key_for(name).unwrap_or_else(|error| panic!("{name}: {error}"));
+                assert_ne!(
+                    key,
+                    Key::Unicode(name.chars().next().expect("non-empty")),
+                    "{name} fell through to its first character instead of naming a key"
+                );
+            }
+        }
+
+        #[test]
+        fn a_single_character_becomes_itself() {
+            assert_eq!(key_for("s").expect("s"), Key::Unicode('s'));
+            assert_eq!(key_for("7").expect("7"), Key::Unicode('7'));
+            assert_eq!(key_for("ü").expect("ü"), Key::Unicode('ü'));
+        }
+
+        /// A multi-character token that is not a known name is refused
+        /// rather than silently becoming its first letter.
+        #[test]
+        fn an_unknown_multi_character_key_is_refused_and_says_what_is_allowed() {
+            let error = key_for("fnord").expect_err("not a key");
+            let message = error.to_string();
+            assert!(message.contains("fnord"), "{message}");
+            assert!(message.contains("shift"), "lists the names: {message}");
+            assert!(key_for("").is_err());
+        }
+    }
+}
+
 /// Wayland: the portal grants, EIS carries, and the coordinate space is a
 /// region the compositor chose.
 ///
@@ -205,7 +344,7 @@ pub fn availability() -> Result<(), String> {
 /// the grant must outlive every event sent through it, or the compositor
 /// revokes the session mid-run.
 #[cfg(target_os = "linux")]
-mod platform {
+mod wayland {
     use anyhow::{Result, anyhow, bail};
     use pixelactions_core::flow::Axis;
     use pixelactions_core::stream::place;
@@ -214,7 +353,7 @@ mod platform {
     use super::{Button, Injector};
     use crate::{eis, portal};
 
-    pub struct RealInjector {
+    pub struct WaylandInjector {
         sender: eis::Sender,
         monitors: Vec<MonitorRecord>,
         /// Never read, never dropped early. The portal ties the session's
@@ -222,7 +361,7 @@ mod platform {
         _grant: portal::Grant,
     }
 
-    impl RealInjector {
+    impl WaylandInjector {
         /// Negotiate consent and connect. The monitors come from the
         /// session because the physical pixels a flow resolves to mean
         /// nothing without them.
@@ -249,7 +388,7 @@ mod platform {
         }
     }
 
-    impl Injector for RealInjector {
+    impl Injector for WaylandInjector {
         /// Takes physical pixels, like every other platform on Linux, and
         /// does the last hop here because only this layer knows the
         /// granted regions. The arithmetic itself is in core, tested.
@@ -344,16 +483,277 @@ mod platform {
     }
 }
 
-#[cfg(target_os = "macos")]
-mod platform {
-    use anyhow::{Context, Result, anyhow};
+/// X11: XTEST against the root window, in the pixels the session already
+/// speaks.
+///
+/// The platform with the least between a coordinate and a click. XTEST
+/// takes root-window coordinates — one space covering every output,
+/// origin at the top-left of the whole X screen — which is exactly what
+/// `convert::native_space()` already resolves `Space::Auto` to here, so
+/// there is no conversion at this layer and no state to hold. With `XRandR`,
+/// several monitors are one screen, so the session's global `origin_px`
+/// layout maps straight through.
+///
+/// Two things X11 has that Wayland does not, and both matter:
+///
+/// - **The pointer position can be read**, so the corner kill switch works
+///   and the probe is a real proof rather than an acceptance.
+/// - **Typing is layout-independent.** A character the active keymap
+///   cannot reach is typed by binding it to a spare keycode for the
+///   keystroke and unbinding it after — enigo's remap path. An EI keyboard
+///   on Wayland is welded to the compositor's keymap and cannot do this.
+///
+/// What X11 has that nothing else does: **no permission model at all.**
+/// Any client may inject into any other, so there is nothing to grant and
+/// nothing to check. `doctor` says so rather than implying a guard exists.
+#[cfg(target_os = "linux")]
+mod x11 {
+    use anyhow::{Result, anyhow, bail};
     use enigo::{
-        Axis as EnigoAxis, Button as EnigoButton, Coordinate, Direction, Enigo, Key, Keyboard,
-        Mouse, Settings,
+        Axis as EnigoAxis, Button as EnigoButton, Coordinate, Direction, Enigo, Keyboard, Mouse,
+        Settings,
     };
     use pixelactions_core::flow::Axis;
 
-    use super::{Button, Injector};
+    use super::{Button, Injector, keys::key_for};
+
+    /// How long to wait before asking the server where the pointer ended
+    /// up. `XSync` only proves the server *processed* the fake event; the
+    /// pointer position it then reports is what proves it acted on it.
+    const PROBE_SETTLE: std::time::Duration = std::time::Duration::from_millis(40);
+
+    pub struct X11Injector {
+        enigo: Enigo,
+    }
+
+    impl X11Injector {
+        /// Connect to `$DISPLAY`.
+        ///
+        /// Nothing is granted and nothing prompts — this either reaches an
+        /// X server or it does not, and a failure here is environmental.
+        pub fn new() -> Result<Self> {
+            let display = std::env::var("DISPLAY").unwrap_or_default();
+            let enigo = Enigo::new(&Settings::default()).map_err(|error| {
+                anyhow!(
+                    "cannot connect to the X server at DISPLAY={display:?}: {error}. \
+                     Check that DISPLAY names the session you meant, that the server is \
+                     running, and that this user is allowed to connect to it (`xhost` \
+                     restrictions and a different user's session are the usual causes)"
+                )
+            })?;
+            Ok(Self { enigo })
+        }
+
+        /// Where the server says the pointer is, in root-window pixels.
+        fn location(&mut self) -> Result<(i32, i32)> {
+            self.enigo
+                .location()
+                .map_err(|error| anyhow!("cannot read the cursor position: {error}"))
+        }
+
+        /// One harmless pixel sideways, reported as whether the server
+        /// honored it. Put back either way.
+        fn nudge(&mut self, from: (i32, i32), step: i32) -> Result<bool> {
+            self.enigo
+                .move_mouse(from.0 + step, from.1, Coordinate::Abs)
+                .map_err(|error| anyhow!("cannot move the cursor: {error}"))?;
+            std::thread::sleep(PROBE_SETTLE);
+            let after = self.location()?;
+            let _ = self.enigo.move_mouse(from.0, from.1, Coordinate::Abs);
+            Ok(after != from)
+        }
+    }
+
+    fn to_enigo(button: Button) -> EnigoButton {
+        match button {
+            Button::Left => EnigoButton::Left,
+        }
+    }
+
+    /// A resolved point as XTEST root coordinates, or why it is not one.
+    ///
+    /// Root-window coordinates start at (0, 0) and span every output, so a
+    /// negative one cannot be expressed at all. Refusing it by name is the
+    /// point: the alternative is a coordinate the server clamps to a screen
+    /// corner and clicks there, which is the one outcome this tool exists
+    /// to prevent. The upper bound is enigo's — root coordinates are `i16`,
+    /// which no real display approaches.
+    ///
+    /// A negative point reaching here means the session describes a layout
+    /// this display server does not have, which is what a session captured
+    /// on another platform looks like.
+    fn root_point(x: f64, y: f64) -> Result<(i32, i32)> {
+        let (px, py) = (x.round() as i32, y.round() as i32);
+        if px < 0 || py < 0 {
+            bail!(
+                "({x:.0}, {y:.0}) is not a point on this X screen: XTEST addresses the root \
+                 window, whose coordinates start at (0, 0) and span every output, so a \
+                 negative one cannot be expressed. Re-mark the region with pixelcoords on \
+                 this session"
+            );
+        }
+        Ok((px, py))
+    }
+
+    impl Injector for X11Injector {
+        /// Takes global physical pixels and passes them to XTEST unchanged.
+        fn move_to(&mut self, x: f64, y: f64) -> Result<()> {
+            let (px, py) = root_point(x, y)?;
+            self.enigo
+                .move_mouse(px, py, Coordinate::Abs)
+                .map_err(|error| anyhow!("move to ({px}, {py}) failed: {error}"))
+        }
+
+        fn click(&mut self, button: Button) -> Result<()> {
+            self.enigo
+                .button(to_enigo(button), Direction::Click)
+                .map_err(|error| anyhow!("click failed: {error}"))
+        }
+
+        fn double_click(&mut self, button: Button) -> Result<()> {
+            self.click(button)?;
+            // The application decides what counts as a double-click by
+            // timing, same as everywhere else; a short gap keeps both
+            // inside its window.
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            self.click(button)
+        }
+
+        fn press(&mut self, button: Button) -> Result<()> {
+            self.enigo
+                .button(to_enigo(button), Direction::Press)
+                .map_err(|error| anyhow!("press failed: {error}"))
+        }
+
+        fn release(&mut self, button: Button) -> Result<()> {
+            self.enigo
+                .button(to_enigo(button), Direction::Release)
+                .map_err(|error| anyhow!("release failed: {error}"))
+        }
+
+        /// Type through the remap path, so the text does not have to be on
+        /// the active layout.
+        ///
+        /// X11 has no Unicode-text event, so this is one keystroke per
+        /// character; a character the keymap cannot reach gets a spare
+        /// keycode bound to it for that keystroke, and the binding is
+        /// reverted when the connection drops. That is what makes `é` on a
+        /// US layout type `é` rather than nothing.
+        fn text(&mut self, text: &str) -> Result<()> {
+            self.enigo
+                .text(text)
+                .map_err(|error| anyhow!("typing failed: {error}"))
+        }
+
+        fn chord(&mut self, chord: &str) -> Result<()> {
+            let (modifiers, key) = pixelactions_core::chord::split(chord)?;
+            let mut held = Vec::new();
+            for token in &modifiers {
+                let modifier = key_for(token)?;
+                self.enigo
+                    .key(modifier, Direction::Press)
+                    .map_err(|error| anyhow!("holding {token} failed: {error}"))?;
+                held.push(modifier);
+            }
+            let result = self
+                .enigo
+                .key(key_for(key)?, Direction::Click)
+                .map_err(|error| anyhow!("pressing {key} failed: {error}"));
+            // Release in reverse whatever happened to the key press — a
+            // stuck modifier is worse than a failed chord.
+            for modifier in held.into_iter().rev() {
+                let _ = self.enigo.key(modifier, Direction::Release);
+            }
+            result
+        }
+
+        /// Wheel clicks land wherever the pointer is, as buttons 4–7.
+        fn scroll(&mut self, amount: i32, axis: Axis) -> Result<()> {
+            let axis = match axis {
+                Axis::Vertical => EnigoAxis::Vertical,
+                Axis::Horizontal => EnigoAxis::Horizontal,
+            };
+            self.enigo
+                .scroll(amount, axis)
+                .map_err(|error| anyhow!("cannot scroll: {error}"))
+        }
+
+        /// X11 will say where the pointer is, which is what makes the
+        /// corner kill switch work on this platform and not on Wayland.
+        fn cursor(&mut self) -> Result<(f64, f64)> {
+            let (x, y) = self.location()?;
+            Ok((f64::from(x), f64::from(y)))
+        }
+
+        /// Move one pixel and ask the server whether it happened.
+        ///
+        /// Both directions are tried because X11 clamps a move to the
+        /// screen: a pointer already parked on the right edge cannot go
+        /// further right, and reporting that as a failure would blame the
+        /// tool for where the mouse happened to be sitting. Only a pointer
+        /// that moves neither way is a real refusal — a pointer grab, or a
+        /// server built without XTEST.
+        fn probe(&mut self) -> Result<()> {
+            let from = self.location()?;
+            for step in [1, -1] {
+                if self.nudge(from, step)? {
+                    return Ok(());
+                }
+            }
+            Err(anyhow!(
+                "the cursor did not move: the X server processed the XTEST event and the \
+                 pointer stayed at ({}, {}). Something holds a pointer grab, or this server \
+                 was built without the XTEST extension",
+                from.0,
+                from.1
+            ))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The session speaks in whole pixels but conversion produces
+        /// fractions, and XTEST takes integers — so the rounding happens
+        /// here, once, rather than in each call site's cast.
+        #[test]
+        fn a_fractional_point_rounds_to_the_nearest_pixel() {
+            assert_eq!(root_point(10.4, 20.6).expect("on screen"), (10, 21));
+            assert_eq!(root_point(0.0, 0.0).expect("the origin is a pixel"), (0, 0));
+            // Rounds toward zero's neighbour, not through it: 0.4 must not
+            // become -0 and then trip the guard below.
+            assert_eq!(root_point(0.4, 0.4).expect("on screen"), (0, 0));
+        }
+
+        /// The refusal that matters. A negative coordinate is what a session
+        /// from another platform's layout looks like, and X11 would clamp it
+        /// to a corner and click there.
+        #[test]
+        fn a_negative_point_is_refused_by_name_not_clamped() {
+            for (x, y) in [(-1.0, 100.0), (100.0, -1.0), (-1920.0, -1080.0)] {
+                let error = root_point(x, y).expect_err("off the root window");
+                let message = error.to_string();
+                assert!(message.contains("root window"), "{message}");
+                assert!(
+                    message.contains(&format!("({x:.0}, {y:.0})")),
+                    "names the point it refused: {message}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use anyhow::{Result, anyhow};
+    use enigo::{
+        Axis as EnigoAxis, Button as EnigoButton, Coordinate, Direction, Enigo, Keyboard, Mouse,
+        Settings,
+    };
+    use pixelactions_core::flow::Axis;
+
+    use super::{Button, Injector, keys::key_for};
 
     /// The real thing: enigo over Core Graphics.
     ///
@@ -383,39 +783,6 @@ mod platform {
         match button {
             Button::Left => EnigoButton::Left,
         }
-    }
-
-    /// Map a chord token to an enigo key. Modifiers are named the way a
-    /// human writes them; anything else is a single character.
-    fn key_for(token: &str) -> Result<Key> {
-        let key = match token.to_ascii_lowercase().as_str() {
-            "cmd" | "command" | "meta" | "super" => Key::Meta,
-            "ctrl" | "control" => Key::Control,
-            "alt" | "option" | "opt" => Key::Alt,
-            "shift" => Key::Shift,
-            "tab" => Key::Tab,
-            "enter" | "return" => Key::Return,
-            "esc" | "escape" => Key::Escape,
-            "space" => Key::Space,
-            "backspace" | "delete" => Key::Backspace,
-            "up" => Key::UpArrow,
-            "down" => Key::DownArrow,
-            "left" => Key::LeftArrow,
-            "right" => Key::RightArrow,
-            other => {
-                let mut chars = other.chars();
-                let first = chars.next().context("empty key in chord")?;
-                if chars.next().is_some() {
-                    return Err(anyhow!(
-                        "unknown key {other:?} in chord — use a single character or a \
-                         named key (cmd, ctrl, alt, shift, tab, enter, esc, space, \
-                         backspace, arrows)"
-                    ));
-                }
-                Key::Unicode(first)
-            }
-        };
-        Ok(key)
     }
 
     impl Injector for RealInjector {

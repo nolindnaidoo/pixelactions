@@ -95,22 +95,41 @@ struct Report {
 }
 
 /// What a Linux session can actually do, discovered rather than assumed.
+///
+/// The two display servers have nothing in common to report: Wayland's
+/// story is a portal and a remembered grant, X11's is a display socket and
+/// no permission model at all. So each set of fields is `Option` and
+/// **absent** on the other server rather than zeroed — a `0` for a portal
+/// version on an X11 session would read as "the portal answered and said
+/// zero", which is a different and untrue thing.
 #[derive(Debug, Serialize)]
 struct LinuxStatus {
     server: pixelactions_core::display::Server,
     /// Which path input would take, named so a bug report can say it.
     /// `none` means this session has no path at all.
     rung: &'static str,
-    portal_remote_desktop_version: u32,
-    portal_screen_cast_version: u32,
+    /// X11: the display this session names, and whether it answered. The
+    /// two failure modes on X11 are both environmental, so they are what
+    /// gets reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connected: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    portal_remote_desktop_version: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    portal_screen_cast_version: Option<u32>,
     /// Bitmask: 1 keyboard, 2 pointer, 4 touchscreen.
-    portal_device_types: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    portal_device_types: Option<u32>,
     /// Whether the compositor could report the pointer position through
     /// screencast metadata. Reported because it is exactly what a Wayland
     /// kill switch would need, and this build does not yet consume it.
-    cursor_metadata_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cursor_metadata_available: Option<bool>,
     /// Whether a previous grant was stored, so no dialog is expected.
-    grant_remembered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    grant_remembered: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -238,7 +257,7 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
             &report.probe.detail,
         ) {
             (true, true, _) => {
-                println!("probe:           the cursor moved — input permission is real");
+                println!("probe:           the cursor moved, and the OS confirmed where it went");
             }
             // Wayland: granted and accepted, but unprovable from here.
             (true, false, detail) => {
@@ -259,7 +278,7 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
 
 /// One line naming what a grant costs on this platform, since the answer
 /// differs in kind: macOS asks once in System Settings, Wayland asks the
-/// user per grant and remembers it.
+/// user per grant and remembers it, and X11 does not ask at all.
 fn inject_line(report: &Report) -> String {
     if !report.capabilities.inject {
         return "no".to_string();
@@ -267,81 +286,169 @@ fn inject_line(report: &Report) -> String {
     let Some(linux) = &report.linux else {
         return "yes — needs macOS Accessibility permission".to_string();
     };
-    let grant = if linux.grant_remembered {
-        "a remembered screen-share grant"
+    // Belt and braces: the capability and the path are discovered by
+    // separate calls, and "yes — via none" is a sentence this report must
+    // never print. If they disagree, the pessimistic answer is the true one.
+    if linux.rung == "none" {
+        return "no — this session has no input path".to_string();
+    }
+    format!("yes — via {}, {}", linux.rung, grant_cost(linux))
+}
+
+/// What consent costs on this session, in a phrase.
+fn grant_cost(linux: &LinuxStatus) -> &'static str {
+    match (linux.server, linux.grant_remembered) {
+        (pixelactions_core::display::Server::X11, _) => "which asks nothing of you",
+        (_, Some(true)) => "using a remembered screen-share grant",
+        _ => "using a screen-share grant you approve once",
+    }
+}
+
+/// The X11 line: which display, and whether it answered. `None` on any
+/// other server, which has no display socket to name.
+fn display_line(linux: &LinuxStatus) -> Option<String> {
+    let verdict = if linux.connected? {
+        "connected"
     } else {
-        "a screen-share grant you approve once"
+        "no answer"
     };
-    format!("yes — via {} using {grant}", linux.rung)
+    let display = linux.display.as_deref().unwrap_or("(unset)");
+    Some(format!("{display} — {verdict}"))
+}
+
+/// What the portal offers. `None` when nothing asked it — an X11 session,
+/// or a Wayland one where the call failed.
+fn portal_line(linux: &LinuxStatus) -> Option<String> {
+    Some(format!(
+        "RemoteDesktop v{} · ScreenCast v{} · devices {:#b}",
+        linux.portal_remote_desktop_version?,
+        linux.portal_screen_cast_version.unwrap_or(0),
+        linux.portal_device_types.unwrap_or(0)
+    ))
+}
+
+/// Who has to approve, told apart from who already has. "Nothing was
+/// remembered" and "there is nothing to remember" are different answers,
+/// and on X11 the second one is the security story.
+fn grant_line(linux: &LinuxStatus) -> &'static str {
+    use pixelactions_core::display::Server;
+
+    match (linux.server, linux.grant_remembered) {
+        (Server::X11, _) => {
+            "none needed — any X client may inject into any other, which is the hole Wayland closes"
+        }
+        (_, Some(true)) => "remembered — no dialog expected",
+        (_, Some(false)) => "not yet given — the first run will ask",
+        (_, None) => "nothing to grant — this session has no input path",
+    }
+}
+
+/// Whether the corner kill switch has anything to watch. This is the one
+/// line where X11 is ahead of Wayland, and the reason is worth printing.
+fn kill_switch_line(linux: &LinuxStatus) -> &'static str {
+    use pixelactions_core::display::Server;
+
+    match (linux.server, linux.cursor_metadata_available) {
+        (Server::X11, _) => "armed — X11 reports the pointer position, so the corner check works",
+        (Server::Wayland, Some(true)) => {
+            "no eyes on Wayland in this build (the compositor could provide them)"
+        }
+        (Server::Wayland, _) => "no eyes on Wayland, and this compositor offers no cursor metadata",
+        (Server::Unknown, _) => "nothing to watch — no session was found",
+    }
 }
 
 fn print_linux(linux: &LinuxStatus) {
     println!("session:         {}", linux.server.name());
     println!("input path:      {}", linux.rung);
-    println!(
-        "portal:          RemoteDesktop v{} · ScreenCast v{} · devices {:#b}",
-        linux.portal_remote_desktop_version,
-        linux.portal_screen_cast_version,
-        linux.portal_device_types
-    );
-    println!(
-        "grant:           {}",
-        if linux.grant_remembered {
-            "remembered — no dialog expected"
-        } else {
-            "not yet given — the first run will ask"
-        }
-    );
-    println!(
-        "kill switch:     {}",
-        if linux.cursor_metadata_available {
-            "no eyes on Wayland in this build (the compositor could provide them)"
-        } else {
-            "no eyes on Wayland, and this compositor offers no cursor metadata"
-        }
-    );
+    if let Some(display) = display_line(linux) {
+        println!("display:         {display}");
+    }
+    if let Some(portal) = portal_line(linux) {
+        println!("portal:          {portal}");
+    }
+    println!("grant:           {}", grant_line(linux));
+    println!("kill switch:     {}", kill_switch_line(linux));
+}
+
+/// A session with no input path at all — the shape every other branch
+/// falls back to, so a new field cannot be forgotten in one place.
+#[cfg(any(target_os = "linux", test))]
+fn no_input_path(server: pixelactions_core::display::Server) -> LinuxStatus {
+    LinuxStatus {
+        server,
+        rung: "none",
+        display: None,
+        connected: None,
+        portal_remote_desktop_version: None,
+        portal_screen_cast_version: None,
+        portal_device_types: None,
+        cursor_metadata_available: None,
+        grant_remembered: None,
+    }
 }
 
 /// What this Linux session offers. `None` off Linux.
 #[cfg(target_os = "linux")]
 fn linux_status() -> Option<LinuxStatus> {
-    use pixelactions_core::display::{Server, detect};
+    use pixelactions_core::display::Server;
 
-    let server = detect(
-        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
-        std::env::var("DISPLAY").ok().as_deref(),
-    );
-    // Asking the portal is cheap and prompts nothing, but it is only
-    // meaningful on Wayland; an X11 session has a different path entirely.
-    let portal = match server {
-        Server::Wayland => crate::portal::capabilities().ok(),
-        _ => None,
+    let server = crate::inject::session_server();
+    let status = match server {
+        Server::X11 => x11_status(),
+        Server::Wayland => wayland_status(),
+        Server::Unknown => no_input_path(server),
     };
-    let Some(portal) = portal else {
-        return Some(LinuxStatus {
-            server,
-            rung: "none",
-            portal_remote_desktop_version: 0,
-            portal_screen_cast_version: 0,
-            portal_device_types: 0,
-            cursor_metadata_available: false,
-            grant_remembered: false,
-        });
+    Some(status)
+}
+
+/// Both X11 failure modes are environmental, so both get reported: which
+/// display was tried, and whether it answered.
+///
+/// Connecting is safe to do unasked, which is exactly the point being
+/// reported — XTEST grants nothing and prompts nobody, so the connection
+/// is opened and dropped on the spot.
+#[cfg(target_os = "linux")]
+fn x11_status() -> LinuxStatus {
+    use pixelactions_core::display::Server;
+
+    let connected = crate::inject::X11Injector::new().is_ok();
+    LinuxStatus {
+        rung: if connected {
+            "XTEST on the root window"
+        } else {
+            "none"
+        },
+        display: std::env::var("DISPLAY")
+            .ok()
+            .filter(|value| !value.trim().is_empty()),
+        connected: Some(connected),
+        ..no_input_path(Server::X11)
+    }
+}
+
+/// Asking the portal is cheap and prompts nothing, so `doctor` asks rather
+/// than guesses.
+#[cfg(target_os = "linux")]
+fn wayland_status() -> LinuxStatus {
+    use pixelactions_core::display::Server;
+
+    let Ok(portal) = crate::portal::capabilities() else {
+        return no_input_path(Server::Wayland);
     };
-    Some(LinuxStatus {
-        server,
+    LinuxStatus {
         rung: if portal.usable() {
             "portal RemoteDesktop + EIS"
         } else {
             "none"
         },
-        portal_remote_desktop_version: portal.remote_desktop_version,
-        portal_screen_cast_version: portal.screen_cast_version,
-        portal_device_types: portal.device_types,
-        cursor_metadata_available: portal.cursor_metadata(),
-        grant_remembered: portal.have_stored_token,
-    })
+        portal_remote_desktop_version: Some(portal.remote_desktop_version),
+        portal_screen_cast_version: Some(portal.screen_cast_version),
+        portal_device_types: Some(portal.device_types),
+        cursor_metadata_available: Some(portal.cursor_metadata()),
+        grant_remembered: Some(portal.have_stored_token),
+        ..no_input_path(Server::Wayland)
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -416,16 +523,12 @@ fn run_probe(requested: bool) -> Probe {
     }
 }
 
-/// On Wayland the probe is where the consent dialog belongs: at setup
-/// time, answered by a human who is present, rather than in the middle of
-/// a run that is not being watched.
-///
-/// What it can establish: the portal granted a session, the compositor
-/// offered a pointer that takes coordinates, and it described a region to
-/// aim inside. What it cannot: that the pointer moved — nothing on Wayland
-/// will say. That gap is reported rather than papered over.
+/// The two Linux paths can prove different amounts, so they are probed
+/// differently rather than reported as if they were the same.
 #[cfg(target_os = "linux")]
 fn run_probe(requested: bool) -> Probe {
+    use pixelactions_core::display::Server;
+
     if !requested {
         return Probe {
             attempted: false,
@@ -442,9 +545,57 @@ fn run_probe(requested: bool) -> Probe {
             detail: Some(reason),
         };
     }
+    match crate::inject::session_server() {
+        Server::X11 => probe_x11(),
+        // Unknown never reaches here: availability refused it above.
+        _ => probe_wayland(),
+    }
+}
+
+/// X11 gets the real proof: read the cursor, move it one pixel, ask the
+/// server where it ended up, put it back.
+///
+/// This is the same check macOS runs, and it can run here for the same
+/// reason — X11 will answer where the pointer is. `XSync` alone would only
+/// prove the server *processed* a fake event, which is not the same as
+/// having acted on it.
+#[cfg(target_os = "linux")]
+fn probe_x11() -> Probe {
+    let outcome = crate::inject::X11Injector::new().and_then(|mut injector| {
+        use crate::inject::Injector;
+        injector.probe()
+    });
+    match outcome {
+        Ok(()) => Probe {
+            attempted: true,
+            moved: true,
+            // Read back from the server, so this is proof rather than
+            // acceptance — the one Linux path that can set both.
+            confirmed: true,
+            detail: None,
+        },
+        Err(error) => Probe {
+            attempted: true,
+            moved: false,
+            confirmed: false,
+            detail: Some(format!("{error:#}")),
+        },
+    }
+}
+
+/// On Wayland the probe is where the consent dialog belongs: at setup
+/// time, answered by a human who is present, rather than in the middle of
+/// a run that is not being watched.
+///
+/// What it can establish: the portal granted a session, the compositor
+/// offered a pointer that takes coordinates, and it described a region to
+/// aim inside. What it cannot: that the pointer moved — nothing on Wayland
+/// will say. That gap is reported rather than papered over.
+#[cfg(target_os = "linux")]
+fn probe_wayland() -> Probe {
     // No monitors: the probe never places a pointer, so it needs no
     // session. Anything that does need one refuses without it.
-    let outcome = crate::inject::RealInjector::new(&[]).and_then(|mut injector| {
+    let outcome = crate::inject::WaylandInjector::new(&[]).and_then(|mut injector| {
         use crate::inject::Injector;
         injector.probe().map(|()| {
             let regions = injector.regions().len();
@@ -520,5 +671,154 @@ mod tests {
         for bad in ["", "0.1", "0.1.2.3", "banana", "v0.1.2", "0.x.2"] {
             assert!(!meets_minimum(bad), "should refuse {bad:?}");
         }
+    }
+
+    use pixelactions_core::display::Server;
+
+    /// An X11 session as `x11_status` would build it, without needing one.
+    fn x11(connected: bool) -> LinuxStatus {
+        LinuxStatus {
+            rung: if connected {
+                "XTEST on the root window"
+            } else {
+                "none"
+            },
+            display: Some(":0".to_string()),
+            connected: Some(connected),
+            ..no_input_path(Server::X11)
+        }
+    }
+
+    /// A working Wayland session as `wayland_status` would build it.
+    fn wayland() -> LinuxStatus {
+        LinuxStatus {
+            rung: "portal RemoteDesktop + EIS",
+            portal_remote_desktop_version: Some(2),
+            portal_screen_cast_version: Some(5),
+            portal_device_types: Some(0b111),
+            cursor_metadata_available: Some(true),
+            grant_remembered: Some(true),
+            ..no_input_path(Server::Wayland)
+        }
+    }
+
+    /// The X11 report must not borrow Wayland's story. Every line where the
+    /// two platforms genuinely differ is checked, because the failure mode
+    /// is a report that reads plausibly and describes the wrong machine.
+    #[test]
+    fn an_x11_session_is_never_described_as_a_wayland_one() {
+        let linux = x11(true);
+        assert_eq!(display_line(&linux).as_deref(), Some(":0 — connected"));
+        assert!(
+            portal_line(&linux).is_none(),
+            "nothing asked the portal on X11, so there is no version to print"
+        );
+        let grant = grant_line(&linux);
+        assert!(grant.contains("none needed"), "{grant}");
+        let kill = kill_switch_line(&linux);
+        assert!(kill.starts_with("armed"), "{kill}");
+        assert!(
+            !kill.contains("no eyes"),
+            "X11 can read the pointer: {kill}"
+        );
+    }
+
+    /// The kill switch is the one place X11 is ahead, and the report has to
+    /// say so in opposite terms on the two servers.
+    #[test]
+    fn the_kill_switch_line_disagrees_between_the_two_servers() {
+        assert_ne!(
+            kill_switch_line(&x11(true)),
+            kill_switch_line(&wayland()),
+            "the whole point of reporting it is that the answer differs"
+        );
+        assert!(kill_switch_line(&wayland()).contains("no eyes"));
+        assert!(
+            kill_switch_line(&no_input_path(Server::Unknown)).contains("no session"),
+            "a session with no path has nothing to watch either"
+        );
+    }
+
+    /// A display that did not answer is the common X11 failure, and it has
+    /// to be visible rather than implied by a missing capability.
+    #[test]
+    fn an_x_display_that_did_not_answer_says_so() {
+        let line = display_line(&x11(false)).expect("X11 names its display");
+        assert!(line.contains("no answer"), "{line}");
+    }
+
+    #[test]
+    fn a_wayland_session_still_reports_its_portal_and_grant() {
+        let linux = wayland();
+        let portal = portal_line(&linux).expect("the portal answered");
+        assert!(portal.contains("RemoteDesktop v2"), "{portal}");
+        assert!(portal.contains("ScreenCast v5"), "{portal}");
+        assert!(
+            display_line(&linux).is_none(),
+            "Wayland has no X display to name"
+        );
+        assert!(grant_line(&linux).contains("remembered"));
+    }
+
+    /// The capability line says what a grant costs, and on X11 the honest
+    /// answer is "nothing" — which is the security story, not a feature.
+    #[test]
+    fn the_capability_line_names_what_each_path_costs() {
+        let report = |linux: Option<LinuxStatus>| Report {
+            schema: 1,
+            platform: "linux",
+            supported_platform: true,
+            native_space: pixelactions_core::convert::Space::Physical,
+            session_schema_supported: SUPPORTED_SCHEMA,
+            pixelcoords: pixelcoords_status(),
+            capabilities: Capabilities {
+                resolve: true,
+                inject: true,
+                verify: true,
+            },
+            accessibility_trusted: None,
+            linux,
+            probe: Probe {
+                attempted: false,
+                moved: false,
+                confirmed: false,
+                detail: None,
+            },
+        };
+        let x11_line = inject_line(&report(Some(x11(true))));
+        assert!(x11_line.contains("XTEST"), "{x11_line}");
+        assert!(x11_line.contains("asks nothing of you"), "{x11_line}");
+
+        let wayland_line = inject_line(&report(Some(wayland())));
+        assert!(wayland_line.contains("remembered"), "{wayland_line}");
+
+        // The sentence this report must never print. A display that did not
+        // answer has no path, whatever the capability flag says.
+        let dead = inject_line(&report(Some(x11(false))));
+        assert!(!dead.contains("via none"), "{dead}");
+        assert!(dead.starts_with("no"), "{dead}");
+
+        // Off Linux there is no session to report, and the macOS answer
+        // must survive that.
+        let mac_line = inject_line(&report(None));
+        assert!(mac_line.contains("Accessibility"), "{mac_line}");
+    }
+
+    /// An X11 session must serialize without portal fields at all. A `0`
+    /// there would read as "the portal answered and said zero".
+    #[test]
+    fn absent_fields_are_omitted_rather_than_zeroed() {
+        let json = serde_json::to_string(&x11(true)).expect("serializes");
+        assert!(json.contains(r#""server":"x11""#), "{json}");
+        assert!(json.contains(r#""connected":true"#), "{json}");
+        assert!(!json.contains("portal_"), "{json}");
+        assert!(!json.contains("grant_remembered"), "{json}");
+
+        let json = serde_json::to_string(&wayland()).expect("serializes");
+        assert!(
+            json.contains(r#""portal_remote_desktop_version":2"#),
+            "{json}"
+        );
+        assert!(!json.contains("connected"), "{json}");
     }
 }

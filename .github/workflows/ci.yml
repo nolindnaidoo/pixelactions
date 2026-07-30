@@ -20,10 +20,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS is the supported platform; the other two build the
-        # platform-free core and prove nothing macOS-specific leaked into
-        # it. Injection is not exercised anywhere — it cannot be verified
-        # headless, and the tool says so rather than pretending.
+        # macOS and Linux are the supported platforms; Windows builds the
+        # platform-free core and proves nothing platform-specific leaked
+        # into it. Injection is exercised in the `xvfb` job below and
+        # nowhere else — it needs a display server, and everything else
+        # here runs headless.
         os: [macos-15, ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
@@ -42,6 +43,38 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --locked
       - run: cargo build --workspace --locked
+
+  # The first job in this project that proves injection instead of building
+  # it. X11 is the one platform whose display server runs in CI, so this is
+  # the only place where construction, connection, injection and read-back
+  # are all exercised against a real server on every push.
+  #
+  # It stays a smoke test. A headless X server is not a desktop: nothing
+  # here proves a click reached an application, and per AGENTS.md the claims
+  # this project makes still come from manual runs on real hardware.
+  xvfb:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - name: Install Linux input dependencies and a virtual X server
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 \
+            libxdo-dev libxkbcommon-dev pkg-config xvfb
+      - run: cargo build --workspace --locked
+      # `doctor --probe` reads the cursor, moves it one pixel, asks the
+      # server where it ended up and puts it back — so exit 0 means the
+      # server honored a synthetic event, not merely that a call returned.
+      # XDG_SESSION_TYPE is set because a CI runner declares no session, and
+      # this job is specifically the X11 path.
+      - name: Prove XTEST injection against a live X server
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            env XDG_SESSION_TYPE=x11 ./target/debug/pixelactions doctor --probe
 
   msrv:
     runs-on: macos-15

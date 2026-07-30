@@ -15,16 +15,27 @@ verification (`assert`). **pixelactions consumes that ground truth and
 performs the interactions** — click, type, chord, drag — declaratively,
 and confirms they landed.
 
-Current scope: **macOS** and **Linux under Wayland** (GNOME and KDE, via
-the xdg-desktop-portal `RemoteDesktop` + EIS path), the full loop —
-resolve, re-locate, act, verify — driven three ways: chained argv, flow
-files, and the `serve` line protocol. X11 and Windows are the next
-milestones. See `design/07-MILESTONES.md`.
+Current scope: **macOS** and **Linux**, both display servers — X11 via
+XTEST on the root window, and Wayland (GNOME and KDE) via the
+xdg-desktop-portal `RemoteDesktop` + EIS path. The full loop — resolve,
+re-locate, act, verify — driven three ways: chained argv, flow files, and
+the `serve` line protocol. Windows is the next milestone. See
+`design/07-MILESTONES.md`.
+
+**Linux picks its injector at runtime**, not at build time: the display
+server is a property of the login session, and the same binary faces
+either one. That decision lives in `pixelactions_core::display::detect`
+and `inject::session_server` — one place, so `availability`, `doctor` and
+the run loop cannot disagree about what they are looking at. Injecting
+through XWayland on a Wayland session would reach X clients only, so a
+session that cannot be named is refused rather than guessed at.
 
 Wayland carries one documented exception to the safety rules below: it
 exposes no way to read the pointer position, so the corner kill switch
 has nothing to watch and a flow must set `failsafe = false`
 deliberately. Nothing is stubbed to hide that — see `inject`'s `cursor`.
+X11 has no such exception and must not grow one: it answers where the
+pointer is, so the kill switch stays armed there.
 
 **The three surfaces are one implementation.** Chained verbs and a
 protocol request both build the same `Flow` and go through the same

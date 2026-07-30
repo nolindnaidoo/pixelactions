@@ -1,8 +1,8 @@
 # Contributing
 
 Thanks for your interest. pixelactions runs verified on **macOS** and on
-**Linux under Wayland** (GNOME and KDE, via the portal + EIS path) right
-now — X11 and Windows are the next milestones — so the most valuable
+**Linux**, both X11 (XTEST) and Wayland (GNOME and KDE, via the portal +
+EIS path) right now — Windows is the next milestone — so the most valuable
 contributions are bug reports from real machines, small focused fixes,
 and the platform work itself.
 
