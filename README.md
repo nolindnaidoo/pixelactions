@@ -45,15 +45,14 @@ best executor in this category and give it away.
 ## Status
 
 **Early.** The loop works end to end on **macOS** and on **Linux**, both
-Wayland (GNOME and KDE) and X11: resolve a label to its click point,
-re-locate it against a fresh capture, act, and confirm. Windows is next;
-no crate or binaries are published yet.
+X11 and Wayland (GNOME and KDE): resolve a label to its click point,
+re-locate it against a fresh capture, act, and confirm. Windows is next.
 
 ## Install
 
-Prebuilt binaries will be on the
-[releases page](https://github.com/nolindnaidoo/pixelactions/releases)
-once published — download, unpack, run. Or build it with cargo:
+Prebuilt binaries for macOS (arm64 and x86_64) and Linux (x86_64) are on
+the [releases page](https://github.com/nolindnaidoo/pixelactions/releases)
+— download, unpack, run. Or build it with cargo:
 
 ```bash
 cargo install pixelactions
@@ -240,8 +239,10 @@ a permission model of any kind: any client may inject into any other, so
 there is nothing to grant, and `doctor` says so rather than implying a
 guard exists.
 
-No crate or binaries are published yet. This table is kept honest —
-claims match runs.
+Binaries ship for the platforms that are actually supported, which is why
+there is no Windows archive on the releases page: shipping a binary that
+refuses to inject would imply support this build does not have. This table
+is kept honest — claims match runs.
 
 ## Non-goals
 

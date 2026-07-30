@@ -64,7 +64,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI (`.github/workflows/ci.yml`) runs seven required jobs on every PR —
+CI (`.github/workflows/ci.yml`) runs eight required jobs on every PR —
 all must pass before anything merges to `main`:
 
 | Job | What it enforces |
@@ -205,7 +205,7 @@ declared stable.
 ## Repository governance
 
 - `main` accepts pull requests only — a branch ruleset blocks direct
-  pushes, force pushes, and deletion, and requires all seven CI jobs
+  pushes, force pushes, and deletion, and requires all eight CI jobs
   green to merge. Anyone can open a PR; only the maintainer merges.
 - Dependabot checks weekly (cargo + GitHub Actions, grouped PRs) and
   security advisories immediately. Patch/minor updates auto-merge once

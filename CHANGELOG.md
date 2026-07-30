@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-07-30
 
 **Linux/X11**, through XTEST on the root window. The same flow file that
 runs on macOS and Wayland runs here — and unlike Wayland, with no
