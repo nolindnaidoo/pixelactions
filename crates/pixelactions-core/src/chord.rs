@@ -13,6 +13,44 @@ pub enum ChordError {
     Empty(String),
 }
 
+/// Every name a chord may use for a key that is not a single character.
+///
+/// Listed here rather than beside an injector because the names are a
+/// promise to whoever writes the flow file, and that promise cannot depend
+/// on which platform reads it: `cmd+s` written on a Mac has to mean
+/// Super+s on Linux. Each platform maps these to its own keys — enigo keys
+/// on macOS and X11, keysyms on Wayland — and both sides carry a test that
+/// every name here resolves, so a name cannot silently work on one
+/// platform and fail on another.
+///
+/// Aliases are deliberate and listed explicitly: the same physical key is
+/// called different things by different people, and refusing `option`
+/// because a Linux keyboard says `alt` would be pedantry.
+pub const NAMED_KEYS: &[&str] = &[
+    "cmd",
+    "command",
+    "meta",
+    "super",
+    "ctrl",
+    "control",
+    "alt",
+    "option",
+    "opt",
+    "shift",
+    "tab",
+    "enter",
+    "return",
+    "esc",
+    "escape",
+    "space",
+    "backspace",
+    "delete",
+    "up",
+    "down",
+    "left",
+    "right",
+];
+
 /// Split a chord into its modifiers and its final key: `cmd+shift+s` →
 /// `(["cmd", "shift"], "s")`.
 ///
@@ -68,5 +106,32 @@ mod tests {
     fn the_error_quotes_the_chord_it_could_not_read() {
         let error = split("+").expect_err("empty");
         assert!(error.to_string().contains("\"+\""), "{error}");
+    }
+
+    /// The list is matched against lowercased tokens and printed in error
+    /// messages, so an entry with a capital or a duplicate would be a name
+    /// no chord can ever reach.
+    #[test]
+    fn every_named_key_is_lowercase_and_listed_once() {
+        for name in NAMED_KEYS {
+            assert_eq!(*name, name.to_ascii_lowercase(), "{name}");
+            assert!(!name.is_empty());
+            assert_eq!(
+                NAMED_KEYS.iter().filter(|other| *other == name).count(),
+                1,
+                "{name} is listed more than once"
+            );
+        }
+    }
+
+    /// A named key is a whole token, so none of them may contain the
+    /// separator a chord splits on.
+    #[test]
+    fn no_named_key_contains_the_separator() {
+        for name in NAMED_KEYS {
+            let (modifiers, key) = split(name).expect("a bare name is a valid chord");
+            assert!(modifiers.is_empty(), "{name}");
+            assert_eq!(key, *name);
+        }
     }
 }

@@ -196,11 +196,26 @@ pub fn make_injector(
     Ok(Box::new(inject::RealInjector::new()?))
 }
 
+/// Linux picks its injector at runtime, because the display server is not
+/// a build-time fact. Getting this wrong is worse than failing: XTEST on a
+/// Wayland session reaches `XWayland` clients only, so the pointer would
+/// travel over native windows that never see the events. `availability`
+/// has already refused a session with no path by the time this runs; the
+/// arm is here so that stays true by construction rather than by comment.
 #[cfg(target_os = "linux")]
 pub fn make_injector(
     monitors: &[pixelcoords_core::session::MonitorRecord],
 ) -> Result<Box<dyn inject::Injector>> {
-    Ok(Box::new(inject::RealInjector::new(monitors)?))
+    use pixelactions_core::display::Server;
+
+    match inject::session_server() {
+        Server::X11 => Ok(Box::new(inject::X11Injector::new()?)),
+        Server::Wayland => Ok(Box::new(inject::WaylandInjector::new(monitors)?)),
+        Server::Unknown => anyhow::bail!(
+            "no desktop session was found — neither XDG_SESSION_TYPE, WAYLAND_DISPLAY nor \
+             DISPLAY names one, so there is nothing to send input to"
+        ),
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

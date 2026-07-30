@@ -81,14 +81,12 @@ Two things this milestone established that the research could not:
 Wayland session. Verified by hand on GNOME 46: a marked region clicked
 and the application reacted, placement exact to the pixel.
 
-## 0.3.0 — Windows
+## 0.3.0 — Linux/X11
 
-The platform carrying the most demand (CI rigs, Citrix/VDI, kiosks).
-Adds the multi-monitor normalization work, `MOUSEEVENTF_VIRTUALDESK`,
-the `−1` off-by-one, scancode/Unicode dual keyboard paths, and
-per-platform `doctor` output.
-
-## 0.4.0 — Linux/X11
+**Reordered again, for the same reason as 0.2.0**: X11 was the session the
+developer had logged into, and the platform under the developer's hands is
+the one that gets run daily. Windows keeps its scope and shifts down a
+version; no version is skipped.
 
 Every agent stack shelling out to xdotool in a container is doing
 coordinate injection on X11 with no relocation and no verification —
@@ -96,8 +94,37 @@ exactly the loop this tool closes. XTEST in root-window pixels, off-layout
 typing via temporary keymap remapping, and the one platform where a real
 display server can run in CI (Xvfb).
 
-**Done when:** the same flow file runs unmodified on macOS, Wayland,
-Windows and X11, and CI proves what it can on a headed runner.
+Three things this milestone settled:
+
+- **There is no conversion at the injector.** XTEST's space *is* the
+  session's space — one coordinate system over every output, origin at
+  (0, 0) — so `Space::Auto` resolving to `Physical` was already the whole
+  answer. The only new rule is that a negative coordinate is refused,
+  because root coordinates cannot express one and the server would clamp
+  it to a corner and click there.
+- **The kill switch works**, because X11 will tell you where the pointer
+  is. This is the Wayland caveat resolved rather than repeated, and it is
+  the one line where X11 is ahead. It must stay that way.
+- **X11 has no permission model at all**, which is reported rather than
+  enjoyed quietly. Any client may inject into any other; `doctor` names
+  that as the hole Wayland closes.
+
+**Done when:** a flow file resolves, acts and reports on an X11 session,
+and CI proves what it can against a live X server. Verified by hand on
+GNOME 46 X11: a marked calculator key clicked from an unfocused window,
+then `esc`, `×3` and `enter` producing `7×3 = 21` — which also proves the
+remap path, since `×` is on no US layout — and the kill switch refusing a
+step on a pointer position it read back.
+
+## 0.4.0 — Windows
+
+The platform carrying the most demand (CI rigs, Citrix/VDI, kiosks).
+Adds the multi-monitor normalization work, `MOUSEEVENTF_VIRTUALDESK`,
+the `−1` off-by-one, scancode/Unicode dual keyboard paths, and
+per-platform `doctor` output.
+
+**Done when:** the same flow file runs unmodified on macOS, Wayland, X11
+and Windows.
 
 ## 0.5.0 — safety and orchestration
 

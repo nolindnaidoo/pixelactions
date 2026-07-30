@@ -6,6 +6,89 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## 0.3.0 — unreleased
+
+**Linux/X11**, through XTEST on the root window. The same flow file that
+runs on macOS and Wayland runs here — and unlike Wayland, with no
+exceptions: the kill switch works, so `failsafe` stays on.
+
+X11 is where the thesis lands hardest. Every agent stack shelling out to
+xdotool in a container is doing coordinate injection on X11 with no
+relocation and no verification, which is the loop this tool closes.
+
+Windows moves to 0.4.0. X11 landed first because it is the session the
+developer logged into, the same reason Wayland took 0.2.0 ahead of both.
+
+### How it works
+
+- **XTEST in root-window pixels, with no conversion at all.** X11's input
+  space *is* the space a session records: one coordinate system covering
+  every output, origin at the top-left of the whole screen. With XRandR
+  several monitors are one screen, so the session's global `origin_px`
+  layout maps straight through, and `Space::Auto` already resolved to
+  `Physical` here. A negative coordinate is refused by name — root
+  coordinates start at (0, 0), and sending one would clamp the pointer to
+  a corner and click there.
+- **Typing does not care what your layout is.** A character the active
+  keymap cannot reach is bound to a spare keycode for the keystroke and
+  unbound afterwards. Verified by typing `×` (U+00D7, on no US layout)
+  into a calculator on a US layout. This is the one thing X11 does that
+  Wayland cannot: an EI keyboard is welded to the compositor's keymap.
+- **No permission model, said out loud.** Any X client may inject into any
+  other, so there is nothing to grant and nothing to check — which is
+  precisely the hole Wayland closes. `doctor` reports it as the security
+  story it is rather than as a convenience.
+- **Support means a server answered.** There being nothing to ask
+  permission for leaves exactly one question, so the availability check
+  connects rather than trusting `XDG_SESSION_TYPE=x11` — naming a session
+  says nothing about a server being on the other end of `DISPLAY`. A dead
+  display is therefore a refusal up front (exit 3, naming the display and
+  the usual causes) rather than a run that reports support and then fails
+  while building the injector.
+
+### The kill switch works here
+
+X11 will tell you where the pointer is, so the corner check has something
+to watch and `failsafe` needs no opting out. This is the Wayland caveat
+resolved rather than repeated:
+
+```
+refused   1. click 7
+          kill switch: the cursor is in a screen corner (110, 344), so the
+          run stopped before this step
+```
+
+### doctor
+
+Reports what had to be discovered rather than assumed, and now reports the
+right things per server. An X11 session no longer carries Wayland's fields
+at all — a portal version of `0` read as "the portal answered and said
+zero", which was untrue — and `--probe` performs the same one-pixel proof
+macOS does, because X11 answers where the pointer went:
+
+```
+session:         x11
+input path:      XTEST on the root window
+display:         :0 — connected
+grant:           none needed — any X client may inject into any other
+kill switch:     armed — X11 reports the pointer position
+probe:           the cursor moved, and the OS confirmed where it went
+```
+
+### CI proves injection for the first time
+
+X11 is the one platform whose display server runs in CI, so a new `xvfb`
+job runs `doctor --probe` against a live Xvfb on every push. It is a smoke
+test, not a substitute: a headless server is not a desktop, and the claims
+above come from manual runs.
+
+### Verified by hand
+
+GNOME 46 on X11 (Ubuntu, 1280x977), against a pixelcoords 0.2.1 session:
+a marked calculator key clicked from an unfocused window and the
+application reacted; `7`, `esc`, `×3`, `enter` producing `7×3 = 21`; and
+the kill switch refusing a step with the pointer position it read back.
+
 ## 0.2.0 — 2026-07-30
 
 **Linux/Wayland**, through the sanctioned path: xdg-desktop-portal

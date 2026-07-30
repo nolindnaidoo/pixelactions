@@ -727,13 +727,19 @@ mod tests {
         assert!(key_for_char(&keymap, '☃').is_none());
     }
 
+    /// Every name core promises a flow author, answered here and reachable
+    /// on a real layout. This is the Wayland half of the pair that keeps
+    /// the two key tables from drifting — `inject::keys` carries the other.
     #[test]
-    fn named_chord_keys_exist_on_a_real_keymap() {
+    fn every_promised_name_exists_on_a_real_keymap() {
         let keymap = compiled_us_keymap();
-        for name in [
-            "ctrl", "shift", "alt", "super", "enter", "esc", "tab", "space",
-        ] {
-            let keysym = keysym_for_token(name).expect(name);
+        for name in pixelactions_core::chord::NAMED_KEYS {
+            let keysym = keysym_for_token(name).unwrap_or_else(|| panic!("no keysym for {name}"));
+            assert_ne!(
+                keysym,
+                xkb::Keysym::from_char(name.chars().next().expect("non-empty")),
+                "{name} fell through to its first character instead of naming a key"
+            );
             assert!(
                 keycode_for_keysym(&keymap, keysym).is_some(),
                 "no keycode for {name}"
