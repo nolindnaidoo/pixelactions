@@ -6,6 +6,72 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## 0.4.0
+
+**Windows**, through `SendInput` across the whole virtual desktop. The
+same flow file that runs on macOS, Wayland and X11 runs here, which was
+the bar design/07 set for this milestone and closes the platform matrix
+this tool set out to cover.
+
+### How it works
+
+- **The pointer does not go through enigo, and that is the whole story of
+  this release.** enigo 0.6.1 normalizes an absolute move against
+  `SM_CXSCREEN`/`SM_CYSCREEN` — the *primary monitor* — and never sets
+  `MOUSEEVENTF_VIRTUALDESK`; its `move_mouse` carries a `TODO` asking
+  whether it should. Every coordinate on a secondary display would land on
+  the primary one, silently, at a plausible-looking position. So absolute
+  motion is written directly on `SendInput` in `win.rs`, with the
+  normalization in `pixelactions_core::virtualdesk` where it is tested for
+  every pixel on both axes. enigo keeps the keyboard, the buttons and the
+  wheel, none of which carry a coordinate.
+- **The `− 1` off-by-one, stated as a test rather than a comment.**
+  Absolute coordinates run 0..65535 over `dimension − 1`, not `dimension`;
+  dividing by the full width leaves the rightmost column and bottom row
+  unreachable and every other pixel fractionally short. The rule is pinned
+  as a round trip — every pixel of a desktop normalizes and reads back as
+  itself — rather than as a handful of examples.
+- **Per-monitor DPI awareness is declared at startup**, in `main`, before
+  anything asks Windows about a coordinate. Without it Windows virtualizes
+  every coordinate it reports and accepts against the primary monitor's
+  scale, so a session's physical pixels and this process's idea of a pixel
+  would be different quantities on any scaled display. pixelcoords
+  declares the same awareness for the same reason; the two must agree, and
+  `doctor` reports whether it actually holds.
+- **A point off this machine's desktop is refused by name**, never
+  clamped. Windows slides an out-of-range absolute event to the nearest
+  edge and clicks there, which is the one outcome this tool exists to
+  prevent. A session captured on a bigger machine now stops the run with
+  the coordinate and the desktop it did not fit in.
+- **UIPI is documented, not worked around.** A medium-integrity process
+  cannot drive an elevated window, the UAC dialog, or the login screen.
+  `doctor` reports whether *this* process is elevated, so the answer is a
+  fact about your machine rather than a warning about both cases. No
+  UIAccess signing dance; the refusal is the feature.
+- **The kill switch is armed**, because Windows answers where the pointer
+  is. Wayland remains the only platform carrying that exception.
+- **Chords stay one table.** `cmd`/`command`/`meta`/`super` map to
+  `Key::Meta`, which is `VK_LWIN` here and `Super_L` on X11, so a chord
+  written on a Mac presses the right key on Windows.
+
+### Verified
+
+On Windows 11, a 3440×1440 display, by measurement rather than by a green
+test: placement read back at (0, 0), mid-screen and (3439, 1439) — the
+last pixel, the one the off-by-one makes unreachable — exact at all three;
+a point at (3900, 1450) from a larger machine's session refused with exit
+1 instead of clamped; a click landing on a button and the application
+reacting; `ö` and `×` typed on a US layout through `KEYEVENTF_UNICODE`;
+`ctrl+a`, `ctrl+shift+k` and `left` arriving as chords rather than as
+characters.
+
+**Not verified on hardware, and stated plainly:** multi-monitor layouts,
+negative desktop origins, and mixed DPI. The author's Windows machine has
+one display at (0, 0), where `MOUSEEVENTF_VIRTUALDESK` and a primary-only
+mapping are indistinguishable. The arithmetic those cases depend on is
+unit-tested against a desktop with a negative origin, but no run on real
+hardware backs it yet.
+
 ## 0.3.0 — 2026-07-30
 
 **Linux/X11**, through XTEST on the root window. The same flow file that

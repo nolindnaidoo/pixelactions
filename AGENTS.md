@@ -15,12 +15,21 @@ verification (`assert`). **pixelactions consumes that ground truth and
 performs the interactions** — click, type, chord, drag — declaratively,
 and confirms they landed.
 
-Current scope: **macOS** and **Linux**, both display servers — X11 via
-XTEST on the root window, and Wayland (GNOME and KDE) via the
-xdg-desktop-portal `RemoteDesktop` + EIS path. The full loop — resolve,
-re-locate, act, verify — driven three ways: chained argv, flow files, and
-the `serve` line protocol. Windows is the next milestone. See
-`design/07-MILESTONES.md`.
+Current scope: **macOS**, **Windows**, and **Linux** on both display
+servers — X11 via XTEST on the root window, and Wayland (GNOME and KDE)
+via the xdg-desktop-portal `RemoteDesktop` + EIS path. The full loop —
+resolve, re-locate, act, verify — driven three ways: chained argv, flow
+files, and the `serve` line protocol. See `design/07-MILESTONES.md`.
+
+**Windows does not take its pointer from enigo, and that is deliberate.**
+enigo owns the keyboard, the buttons and the wheel there; absolute motion
+is written directly on `SendInput` in `win.rs`, because enigo 0.6.1
+normalizes against `SM_CXSCREEN`/`SM_CYSCREEN` — the primary monitor —
+and never sets `MOUSEEVENTF_VIRTUALDESK`, so every coordinate on a
+secondary display would land on the primary one. The arithmetic lives in
+`pixelactions_core::virtualdesk`, tested for every pixel. If enigo grows
+a virtual-desktop path, replacing ours is a welcome simplification — but
+check its code, not its README, before believing it.
 
 **Linux picks its injector at runtime**, not at build time: the display
 server is a property of the login session, and the same binary faces
