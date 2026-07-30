@@ -130,19 +130,63 @@ session schema this build understands, the pixelcoords binary it will
 call and whether it is new enough, and — on macOS — whether Accessibility
 is granted.
 
+On **Linux** it also reports what had to be discovered rather than
+assumed, because the same binary faces a different windowing system
+depending on which session you logged into:
+
+```
+platform:        linux
+supported:       yes
+session:         wayland
+input path:      portal RemoteDesktop + EIS
+portal:          RemoteDesktop v2 · ScreenCast v5 · devices 0b111
+grant:           remembered — no dialog expected
+kill switch:     no eyes on Wayland in this build (the compositor could provide them)
+native space:    Physical
+```
+
+`session` is the display server, `input path` is how events would be
+sent (`none` if this session has no path at all), `portal` is what
+xdg-desktop-portal offers — `RemoteDesktop` must be v2 or newer for
+`ConnectToEIS` — and `grant` says whether a remembered screen share means
+no dialog. When input is unavailable, `supported` gives the reason
+instead of a bare "no", so an X11 session or a compositor without the
+portal says which it is.
+
 `run` and `serve` enforce that minimum themselves before doing anything,
 exiting 3 with the reason. It is not advisory: below the minimum,
 pixelcoords composited the mouse pointer into captures, and since this
 tool parks the pointer on whatever it just clicked, relocation failed in a
 way that looks like flakiness rather than a version problem.
 
-`--probe` proves input permission instead of assuming it: it reads the
-cursor position, moves it one pixel, asks the OS where it ended up, and
-puts it back. This exists because a missing grant makes event posting a
-**silent** no-op — "the call succeeded" proves nothing. If the grant is
-missing, the probe asks macOS for it, which raises the system dialog and
-adds the calling application to the Accessibility list. Exits 3 when the
-probe fails.
+`--probe` proves input permission instead of assuming it, and is the
+right moment to answer a permission prompt: setup time, with a human
+present, rather than partway through an unattended run.
+
+On **macOS** it reads the cursor position, moves it one pixel, asks the
+OS where it ended up, and puts it back. This exists because a missing
+grant makes event posting a **silent** no-op — "the call succeeded"
+proves nothing. If the grant is missing, the probe asks macOS for it,
+which raises the system dialog and adds the calling application to the
+Accessibility list.
+
+On **Wayland** it performs the real grant and reports what that
+established — a pointer that takes coordinates, and a region to aim
+inside — then says plainly that placement is **not confirmed**, because
+nothing on Wayland will say where the pointer went:
+
+```
+probe:           input was granted and accepted, NOT confirmed
+```
+
+The JSON carries this as `moved` and `confirmed` separately: `moved` is
+"the compositor accepted it", `confirmed` is "the OS proved it". Only
+macOS can currently set both. It is the same distinction a run report
+draws between `executed` and `verified` — "nothing errored" is not "it
+worked".
+
+Exits 3 when the probe fails outright; an accepted-but-unconfirmed probe
+exits 0, because the grant genuinely works.
 
 **The grant attaches to the application that launched pixelactions**,
 not to the binary — a CLI inherits its terminal's permission. There will
