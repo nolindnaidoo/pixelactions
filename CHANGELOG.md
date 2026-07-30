@@ -72,7 +72,7 @@ mapping are indistinguishable. The arithmetic those cases depend on is
 unit-tested against a desktop with a negative origin, but no run on real
 hardware backs it yet.
 
-## 0.3.0
+## 0.3.0 — 2026-07-30
 
 **Linux/X11**, through XTEST on the root window. The same flow file that
 runs on macOS and Wayland runs here — and unlike Wayland, with no

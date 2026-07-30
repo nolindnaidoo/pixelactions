@@ -45,16 +45,16 @@ best executor in this category and give it away.
 ## Status
 
 **Early.** The loop works end to end on **macOS**, **Windows**, and
-**Linux** — both Wayland (GNOME and KDE) and X11: resolve a label to its
+**Linux** — both X11 and Wayland (GNOME and KDE): resolve a label to its
 click point, re-locate it against a fresh capture, act, and confirm. That
-is every platform this tool set out to cover; no crate or binaries are
-published yet.
+is every platform this tool set out to cover.
 
 ## Install
 
-Prebuilt binaries will be on the
+Prebuilt binaries for macOS (arm64 and x86_64), Linux (x86_64) and
+Windows (x86_64) are on the
 [releases page](https://github.com/nolindnaidoo/pixelactions/releases)
-once published — download, unpack, run. Or build it with cargo:
+— download, unpack, run. Or build it with cargo:
 
 ```bash
 cargo install pixelactions
@@ -253,8 +253,21 @@ a permission model of any kind: any client may inject into any other, so
 there is nothing to grant, and `doctor` says so rather than implying a
 guard exists.
 
-No crate or binaries are published yet. This table is kept honest —
-claims match runs.
+**Windows has its own limit, and it is the OS's, not this tool's.** UIPI
+means a process at medium integrity cannot send input to an elevated
+window, the UAC dialog, or the login screen. There is no permission that
+lifts it and no workaround here; `doctor` reports whether the process is
+elevated so the answer is a fact about your machine. Placement is measured
+rather than assumed — but on a single-display machine, so **multi-monitor
+and mixed-DPI layouts have not been run on real hardware yet**, only
+unit-tested. Reports from a two-screen desk are the most useful thing
+anyone could send.
+
+Binaries ship for the platforms that are actually supported — all four
+now. Shipping one for a platform that refuses to inject would imply
+support a build does not have, which is the rule that kept Windows off the
+releases page until this release. This table is kept honest — claims match
+runs.
 
 ## Non-goals
 
