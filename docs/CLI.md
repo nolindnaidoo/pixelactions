@@ -108,6 +108,51 @@ recorded as skipped rather than silently dropped.
 `--json` emits a run report: per step, the points **actually used**
 (corrections included), the outcome, timing, and the failure detail.
 
+## `mcp`
+
+Serve the executor over the Model Context Protocol on stdio, so a model
+can perform steps against a session a human marked. pixelcoords serves
+the other half — where to click — and this is where to say *do it*.
+
+```json
+{
+  "mcpServers": {
+    "pixelactions": { "command": "pixelactions", "args": ["mcp"] }
+  }
+}
+```
+
+| Tool | Acts | Backed by |
+|------|------|-----------|
+| `pixelactions_plan` | no | resolves steps, touches nothing |
+| `pixelactions_act` | **yes**, with `--yes` | the same run loop the CLI uses |
+| `pixelactions_find` | no (captures) | `pixelcoords find` |
+
+**Acting is off unless the server was launched with `--yes`.** A model
+cannot pass a CLI flag, so the consent lives with whoever wired the
+client — the same shape `--yes` already has, moved to the only place a
+stdio server has a human in it. A per-call confirmation would be written
+by the model itself, which is a speed bump against a slip rather than a
+gate against intent.
+
+`pixelactions_act` is still advertised on a read-only server, and
+refuses. Hiding it would make a model conclude the tool does not exist;
+refusing tells it what to ask the operator for.
+
+**Read `ok`, not `isError`.** A step that failed, a region that could not
+be found, an act call on a read-only server: all arrive as ordinary
+results with `ok: false` in `structuredContent`. Only a malformed
+question is a protocol error. A model that treats a refusal as a broken
+tool retries — and retrying a tool that posts input is the worst thing
+this server could do.
+
+It adds nothing underneath: the kill switch, relocation, verification and
+the audit log are the run loop's, and a model-driven run gets all four.
+
+Protocol revision `2026-07-28`, with `2025-11-25` also accepted — the
+same pair pixelcoords speaks, so a client driving both halves negotiates
+once. Stateless; `initialize` is still answered for older clients.
+
 ## `serve`
 
 ```
