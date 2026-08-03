@@ -150,7 +150,36 @@ application; `ö` and `×` typed on a US layout; chords and arrows arriving
 as keys. Multi-monitor and mixed-DPI remain unproven on hardware — the
 author's Windows machine has one display — and the docs say so.
 
-## 0.5.0 — safety and orchestration
+## 0.5.0 — the seam closes
+
+**Inserted, and worth saying why.** `08-PIXELCOORDS-CONTRACT.md` decided
+that pixelactions should consume pixelcoords' `resolve`, `wait` and
+`diff` rather than reimplement them — written while all three were still
+roadmap items over there. They shipped. Nothing prompted a revisit, so
+this tool still does the work itself: `wait_for` polls `find` per
+iteration where `wait` scores in place, and `convert.rs` states the
+per-platform units rule that `pixelcoords_core::space` now also states.
+
+Safety and the agent surface keep their scope and shift down two
+versions each — the same rule 0.2.0 and 0.3.0 already applied to
+Windows. No version is skipped, and no milestone loses content.
+
+- Raise the floor: `pixelcoords-core` 0.7, `MIN_PIXELCOORDS` 0.7.0.
+- Consume `resolve`; state the units rule once.
+- `wait` / `gone` call `pixelcoords wait`, spending one `find` on
+  timeout so a failure still names the drift.
+
+**Done when:** the loop is measurably cheaper to wait on, and no rule
+that belongs to pixelcoords is written down twice.
+
+## 0.6.0 — verification that a region *changed*
+
+`verify` proves a region still matches. Nothing proves it stopped
+matching, which is the question that shows an action did something. A
+verb over `pixelcoords diff`, per the contract's "consume, don't
+rebuild".
+
+## 0.7.0 — safety and orchestration
 
 What remains here after the early landings above: an audit log.
 Observable polling, the watchdog, and the kill switch shipped in
@@ -166,12 +195,24 @@ Argv chaining, `serve` (NDJSON over stdio), and `SKILL.md` all landed
 early. Deliberately before the MCP question, because the CLI surface
 reaches strictly more agents than a stdio MCP server does.
 
-## 0.6.0 — the agent surface
+## 0.8.0 — the agent surface
 
 `pixelactions mcp`: `find` / `act` / `assert` as MCP tools. The research
 says agent stacks currently wrap pyautogui and robotjs with no
 verification; this is the commercially relevant surface, and it's
 worthless before the executor is proven — hence last, not first.
+
+That precondition is now met: 0.4.0 runs the same flow file on macOS,
+Wayland, X11 and Windows, each verified by hand. What still argues for
+last is the ordering above it — this surface should inherit an in-place
+`wait`, a `resolve` that is not reassembled here, and an audit log,
+rather than being built on the versions of those that are being
+replaced. pixelcoords shipped its own read-only MCP server in 0.7.0, so
+the loop is currently closed for measurement and open for execution.
+
+One thing to settle in writing before any code: pixelactions **acts**,
+so unlike a read-only server it has no safe default. `--yes` is the gate
+today and a model cannot pass a CLI flag.
 
 ## Later — the rest of the Wayland ladder
 

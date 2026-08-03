@@ -44,8 +44,23 @@ duplicate.
 
 pixelactions pins a minimum `session.json` schema and says so in
 `doctor`. Today that's schema 1 with the additive fields (`platform`,
-`capture`, `name`). Additive-only remains the rule; a breaking change
-bumps schema and pixelactions gates on it.
+`capture`, `name`, `color`, `measures`). Additive-only remains the rule;
+a breaking change bumps schema and pixelactions gates on it.
+
+The rule has now survived a real test. pixelcoords went 0.2 → 0.7 and
+schema 1 never moved: core 0.2 still parses a session that 0.7 wrote,
+`measures` and every shape kind included, and `find --json` still carries
+every field this tool reads under the same name. Additive-only is a
+promise that has been kept, not merely stated.
+
+## Minimum *binary* version, and why it moves with the crate
+
+`doctor::MIN_PIXELCOORDS` is **0.7.0**, matching the `pixelcoords-core`
+pin. The two are one decision, not two: pixelactions links the crate
+*and* shells out to the binary, so a crate that knows about `resolve`
+beside a binary that does not is a pairing `doctor` would otherwise
+bless and the run loop would then fail on. Move them together or not at
+all.
 
 ## What 0.1.0 needs from pixelcoords: nothing new
 
@@ -53,34 +68,36 @@ Shipped v0.1.1 is sufficient. `session.json` + `pixelcoords-core`
 (schema types, `click_point`) + `find --json` cover resolution,
 relocation, and post-action verification. Start building against it.
 
-## Overlaps with pixelcoords' existing roadmap
+## Overlaps with pixelcoords' roadmap — all landed
 
-Its 0.4/0.5 milestones already contain work that pixelactions depends
-on or duplicates. Decide now, not at implementation time:
+These were written while they were still someone else's roadmap items.
+They have all shipped, so the column that matters now is what
+pixelactions does about each.
 
-- **`resolve` (issue #21, filed for this)** — *the seam.* One call
+- **`resolve`** — *the seam.* Shipped in pixelcoords 0.3.0. One call
   returning the click point in the space the platform's input API
   wants, optionally relocated. It removes the reassembly (find →
   parse bbox → compute click point → redo DPI conversion) that every
   executor would otherwise perform, and keeps the conversion math in
-  the crate that owns it. Nice-to-have, not a blocker: pixelactions can
-  do the reassembly itself until it lands.
-- **`emit --format json` (issue #15)** — the human/tool-agnostic
-  cousin of `resolve`. This is exactly
-  "give me the click point in every space, machine-readable." It should
-  land as planned and become the documented interchange, so a
-  third-party executor could consume it too.
-- **`wait` (issue #13)** — pixelcoords polls until a region matches.
-  pixelactions' `wait_for` step should **call it**, not reimplement it.
-  Its existence in pixelcoords is justified independently (agents want
-  it standalone).
-- **`diff` (issue #11)** — region comparison. Useful to pixelactions as
+  the crate that owns it. **Consume it** — pixelactions' own
+  reassembly was always the placeholder.
+- **`emit --format json`** — did **not** ship, and should not. What
+  this asked for was "give me the click point in every space,
+  machine-readable"; `resolve --json` is that, and `emit` stayed what
+  it is — ready-to-paste code for a named tool, where each format
+  *defines* its units. One interchange, not two.
+- **`wait`** — shipped in pixelcoords 0.4.0. pixelactions' `wait_for`
+  step should **call it**, not reimplement it. Its existence in
+  pixelcoords is justified independently (agents want it standalone).
+- **`diff`** — shipped in pixelcoords 0.5.0. Useful to pixelactions as
   a post-action verification stronger than `assert` (state changed vs
   point-inside). Consume, don't rebuild.
-- **Color readout (issue #8)** — recorded per selection. A future
-  pixelactions assertion ("the button is still blue/enabled") gets this
-  for free. Good reason to keep #8 as specced.
-- **Multi-monitor selection (issue #6)** — pixelactions inherits its
+- **Color readout** — shipped; every selection now carries the colour
+  under its click point. The assertion this was kept for ("the button
+  is still blue/enabled") still needs something pixelcoords does not
+  have: a way to sample the colour *now*. That is a pixelcoords issue
+  before it is a pixelactions one, and it is not filed here.
+- **Multi-monitor selection** — shipped. pixelactions inherits its
   identity-stable monitor matching. Same problem, one solution.
 
 ## What pixelactions must NOT push into pixelcoords
