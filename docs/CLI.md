@@ -48,6 +48,7 @@ pixelactions run --session DIR click:submit type:"hi" key:cmd+s wait:done --yes
 | `type:TEXT` | `type` |
 | `key:CHORD` | `key` |
 | `verify:LABEL` | `verify` |
+| `changed:LABEL[>PCT]` | `changed` |
 | `wait:LABEL` | `wait_for` |
 | `gone:LABEL` | `wait_gone` |
 | `pause:MS` | `pause` |
@@ -55,6 +56,12 @@ pixelactions run --session DIR click:submit type:"hi" key:cmd+s wait:done --yes
 `scroll:` borrows drag's `>`: `scroll:results>3` goes down, `-3` up.
 The amount is required — it is already the least predictable value in
 the tool, and defaulting it would hide that.
+
+`changed:` borrows the same `>`, but its argument is optional:
+`changed:panel` passes when any pixel differs, `changed:panel>2.5` when
+more than 2.5% of the region's masked pixels do. Zero is the default
+because "did anything happen at all" is the usual question — if the
+action did nothing, nothing differs.
 
 `type:` keeps everything after the first colon, so
 `type:"time: 10:30"` types the whole string. A chain is parsed

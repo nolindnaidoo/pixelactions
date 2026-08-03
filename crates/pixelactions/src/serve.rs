@@ -209,6 +209,7 @@ impl Server<'_> {
                 // second channel to narrate into.
                 progress: run::silent(),
                 waiter: run::real_waiter(),
+                differ: run::real_differ(),
             },
             &mut verifier,
         );

@@ -19,7 +19,7 @@ pub enum VerbError {
     Malformed(String),
     #[error(
         "unknown verb {0:?} — expected click, double, drag, scroll, hscroll, type, key, \
-         verify, wait, gone, or pause"
+         verify, changed, wait, gone, or pause"
     )]
     Unknown(String),
     #[error("drag needs from>to, e.g. drag:handle>dropzone (got {0:?})")]
@@ -33,6 +33,11 @@ pub enum VerbError {
     ScrollShape(String, String),
     #[error("{0} needs a label, e.g. {0}:submit")]
     EmptyLabel(String),
+    #[error(
+        "changed takes a label, optionally with a percentage: changed:panel, or \
+         changed:panel>2.5 to require more than 2.5% of its pixels to differ (got {0:?})"
+    )]
+    ChangedShape(String),
 }
 
 /// Parse one `verb:argument` argument into a step.
@@ -79,6 +84,28 @@ pub fn parse(argument: &str) -> Result<Step, VerbError> {
             Step::Drag {
                 from: from.trim().to_string(),
                 to: to.trim().to_string(),
+            }
+        }
+        "changed" => {
+            // `changed:label` or `changed:label>PCT`. The threshold is
+            // optional where scroll's amount is required, because zero is
+            // a meaningful default here and an unpredictable one there.
+            let (target, tolerance) = match rest.split_once('>') {
+                None => (rest, 0.0),
+                Some((target, pct)) => {
+                    let parsed: f64 = pct
+                        .trim()
+                        .parse()
+                        .map_err(|_| VerbError::ChangedShape(rest.to_string()))?;
+                    if !parsed.is_finite() || !(0.0..=100.0).contains(&parsed) {
+                        return Err(VerbError::ChangedShape(rest.to_string()));
+                    }
+                    (target, parsed)
+                }
+            };
+            Step::Changed {
+                target: label(verb, target)?,
+                tolerance,
             }
         }
         "scroll" => scroll(verb, rest, Axis::Vertical)?,
@@ -321,5 +348,45 @@ mod tests {
                 target: "done".into()
             }
         );
+    }
+
+    #[test]
+    fn changed_takes_a_bare_label_and_defaults_to_any_pixel() {
+        let Step::Changed { target, tolerance } = parse("changed:panel").expect("parses") else {
+            panic!("wrong step");
+        };
+        assert_eq!(target, "panel");
+        assert!((tolerance - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn changed_takes_a_percentage_after_the_label() {
+        let Step::Changed { target, tolerance } = parse("changed:panel>2.5").expect("parses")
+        else {
+            panic!("wrong step");
+        };
+        assert_eq!(target, "panel");
+        assert!((tolerance - 2.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn changed_refuses_a_percentage_that_is_not_one() {
+        for bad in [
+            "changed:panel>",
+            "changed:panel>banana",
+            "changed:panel>-1",
+            "changed:panel>101",
+            "changed:panel>NaN",
+        ] {
+            assert!(
+                matches!(parse(bad), Err(VerbError::ChangedShape(_))),
+                "should refuse {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn changed_still_needs_a_label() {
+        assert!(matches!(parse("changed:"), Err(VerbError::EmptyLabel(_))));
     }
 }

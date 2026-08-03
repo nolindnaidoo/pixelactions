@@ -47,7 +47,11 @@ pub enum Axis {
 }
 
 /// What a step does.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `PartialEq` but not `Eq`: `changed`'s tolerance is a percentage, and a
+/// float has no total equality. Nothing keys a map on a step, so the
+/// weaker bound costs nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Step {
     /// Click the resolved point of a labeled region.
@@ -84,6 +88,25 @@ pub enum Step {
     /// Poll until a labeled region STOPS matching — "wait until this
     /// spinner goes away", "wait until the button changes state".
     WaitGone { target: String },
+    /// Confirm a labeled region **changed** — the assertion that proves
+    /// an action did something, rather than that it was accepted.
+    ///
+    /// `verify` is the opposite question and answers it with normalized
+    /// correlation, which is brightness- and contrast-blind: a region that
+    /// dims uniformly behind a modal still scores ~1.0. This compares RGB
+    /// directly, so it sees what correlation cannot.
+    ///
+    /// `tolerance` is the percentage of the region's masked pixels that
+    /// must differ before it counts as changed. Zero — any pixel — is the
+    /// default and the right one for "did anything happen at all": if the
+    /// action did nothing, nothing differs. Raise it when something
+    /// unrelated lives in the region; a text caret blinking inside one is
+    /// enough to register on its own.
+    Changed {
+        target: String,
+        #[serde(default)]
+        tolerance: f64,
+    },
     /// Wait a fixed duration. Present because some waits genuinely have
     /// no observable, and pretending otherwise would push people to
     /// sleep-and-hope outside the tool.
@@ -100,7 +123,8 @@ impl Step {
             | Self::Scroll { target, .. }
             | Self::Verify { target }
             | Self::WaitFor { target }
-            | Self::WaitGone { target } => vec![target.as_str()],
+            | Self::WaitGone { target }
+            | Self::Changed { target, .. } => vec![target.as_str()],
             Self::Drag { from, to } => vec![from.as_str(), to.as_str()],
             Self::Type { .. } | Self::Key { .. } | Self::Pause { .. } => Vec::new(),
         }
@@ -124,6 +148,7 @@ impl Step {
             Self::Verify { .. }
             | Self::WaitFor { .. }
             | Self::WaitGone { .. }
+            | Self::Changed { .. }
             | Self::Pause { .. } => false,
         }
     }
@@ -152,6 +177,10 @@ impl Step {
             Self::Verify { target } => format!("verify {target}"),
             Self::WaitFor { target } => format!("wait for {target}"),
             Self::WaitGone { target } => format!("wait until {target} is gone"),
+            Self::Changed { target, tolerance } if *tolerance > 0.0 => {
+                format!("changed {target} by over {tolerance}%")
+            }
+            Self::Changed { target, .. } => format!("changed {target}"),
             Self::Pause { ms } => format!("pause {ms}ms"),
         }
     }

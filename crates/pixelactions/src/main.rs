@@ -186,6 +186,7 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
             checked: flow.settings.relocate,
             progress,
             waiter: run::real_waiter(),
+            differ: run::real_differ(),
         },
         &mut verifier,
     );
