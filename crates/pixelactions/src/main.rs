@@ -13,6 +13,7 @@ mod eis;
 mod inject;
 #[cfg(target_os = "macos")]
 mod mac;
+mod mcp;
 #[cfg(target_os = "linux")]
 mod portal;
 mod run;
@@ -76,6 +77,13 @@ fn main() {
             json,
             yes,
         ),
+        cli::Command::Mcp { yes } => {
+            if let Some(reason) = mcp::preflight(yes) {
+                eprintln!("pixelactions: {reason}");
+                std::process::exit(EXIT_REFUSED);
+            }
+            mcp::serve(yes).map(|()| 0)
+        }
         cli::Command::Serve { session } => serve::run(&expand_home(&session.display().to_string())),
         cli::Command::Doctor { json, probe } => doctor::run(json, probe),
     };
@@ -294,6 +302,73 @@ pub struct Source {
     pub verbs: Vec<String>,
 }
 
+/// Resolve a source to a plan, printing nothing.
+///
+/// The MCP server's `plan` tool. `run_plan` renders the same thing for a
+/// human; this returns it, so the two cannot answer differently.
+pub fn plan_source(source: &Source) -> Result<(Plan, serde_json::Value)> {
+    let (flow, _, session) = load_flow(source)?;
+    let space = flow.settings.space;
+    let resolved = plan(&flow, &session, space)?;
+    // The same document `plan --json` prints, so the two surfaces cannot
+    // describe a plan differently.
+    let document = as_json(&flow, &resolved);
+    Ok((resolved, document))
+}
+
+/// Perform a source, printing nothing, and return the report.
+///
+/// The MCP server's `act` tool. It goes through `run::preflight` and
+/// `run::execute` exactly as `run_flow` does — relocation, the kill
+/// switch, verification and the audit log are all `execute`'s, and a
+/// surface that grew its own copy of any of them would be a bug
+/// (`AGENTS.md`). What differs is only that nothing here writes to a
+/// terminal: a protocol answer is the return value.
+pub fn act_source(source: &Source) -> Result<pixelactions_core::report::RunReport> {
+    inject::availability().map_err(|reason| anyhow::anyhow!("{reason}"))?;
+    doctor::require_supported_pixelcoords().map_err(|reason| anyhow::anyhow!("{reason}"))?;
+
+    let (flow, session_path, session) = load_flow(source)?;
+    let space = flow.settings.space;
+    let resolved = plan(&flow, &session, space)?;
+
+    let mut verifier =
+        |session: &std::path::Path, label: Option<&str>| verify::find(session, label);
+    let corrections = run::preflight(
+        &flow,
+        &session_path,
+        &session.monitors,
+        space,
+        &mut verifier,
+        &|_| {},
+    )?;
+
+    let record = |event: &pixelactions_core::audit::Event| audit::append(event);
+    let auditor: &dyn Fn(&pixelactions_core::audit::Event) = if flow.settings.audit {
+        &record
+    } else {
+        run::no_audit()
+    };
+
+    let mut injector = make_injector(&session.monitors)?;
+    Ok(run::execute(
+        injector.as_mut(),
+        &run::Context {
+            flow: &flow,
+            plan: &resolved,
+            session: &session_path,
+            monitors: &session.monitors,
+            corrections: &corrections,
+            checked: flow.settings.relocate,
+            progress: run::silent(),
+            waiter: run::real_waiter(),
+            differ: run::real_differ(),
+            auditor: &auditor,
+        },
+        &mut verifier,
+    ))
+}
+
 /// Read a flow and its session together — the pairing every command needs.
 fn load_flow(
     source: &Source,
@@ -370,7 +445,7 @@ fn print_human(flow: &Flow, resolved: &Plan, session_path: &std::path::Path) {
     println!("nothing was executed — this build resolves only");
 }
 
-fn as_json(flow: &Flow, resolved: &Plan) -> serde_json::Value {
+pub fn as_json(flow: &Flow, resolved: &Plan) -> serde_json::Value {
     serde_json::json!({
         "schema": 1,
         "session": flow.session,

@@ -8,6 +8,45 @@ CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 
 ## Unreleased — 0.6.0
 
+### `pixelactions mcp` — the executor, reachable by a model
+
+pixelcoords serves a read-only MCP server, so a model could already ask
+*where* to click. Nothing let it say *do it*. Now:
+
+```json
+{ "mcpServers": { "pixelactions": { "command": "pixelactions", "args": ["mcp"] } } }
+```
+
+Three tools: `pixelactions_plan` resolves steps and touches nothing,
+`pixelactions_act` performs them, `pixelactions_find` re-locates a region
+that moved.
+
+**Acting is off unless the server was launched with `--yes`.** This one
+posts real input, so unlike a read-only server it has no safe default —
+and a model cannot pass a CLI flag. So the consent lives with whoever
+wired the client, which is the same shape `--yes` already had, moved to
+the only place a stdio server has a human in it. A per-call confirmation
+would be written by the model itself: a speed bump against a slip, not a
+gate against intent.
+
+`pixelactions_act` is still advertised without `--yes`, and refuses with
+a message naming the remedy. Hiding it would make a model conclude the
+tool does not exist.
+
+**Read `ok`, not `isError`.** A failed step, a region that could not be
+found, an act call on a read-only server — all arrive as ordinary results
+with `ok: false`. Only a malformed question is a protocol error. A model
+that reads a refusal as *the tool is broken* retries, and retrying a tool
+that posts input is the worst failure this surface could have.
+
+It is the **fourth** surface on the same `Flow` → `plan` → `run::execute`
+path as chained verbs, flow files and `serve`. Nothing new underneath, so
+a model-driven run gets the kill switch, relocation, verification and the
+audit log because they were already there.
+
+Protocol revision `2026-07-28`, `2025-11-25` also accepted — the same
+pair pixelcoords speaks. No async runtime.
+
 ### The audit log
 
 A run now leaves a record. `design/07` put this under "safety and

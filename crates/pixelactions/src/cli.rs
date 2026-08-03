@@ -70,6 +70,18 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Serve the executor over the Model Context Protocol on stdio, so an
+    /// LLM can perform steps against a session a human marked.
+    ///
+    /// Read-only unless launched with --yes: acting posts real input, and
+    /// a model cannot pass a CLI flag, so the consent belongs to whoever
+    /// wired the client.
+    Mcp {
+        /// Allow this server to post input. Without it, the acting tool
+        /// is served and refuses every call.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Speak the line protocol on stdin/stdout: one JSON request per
     /// line, one JSON response back. This is how a program in any
     /// language drives pixelactions — it owns the loop, we do the steps.
