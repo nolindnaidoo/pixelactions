@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## Unreleased — 0.5.0
+## 0.5.0 — 2026-08-03
 
 **The seam closes.** `design/08-PIXELCOORDS-CONTRACT.md` decided that this
 tool should consume pixelcoords' `resolve`, `wait` and `diff` rather than
