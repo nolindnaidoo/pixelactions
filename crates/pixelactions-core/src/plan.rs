@@ -7,7 +7,10 @@
 //! planning, before a single event is injected. Half-executed flows are
 //! the worst failure mode this tool could have.
 
+use pixelcoords_core::locate::Delta;
+use pixelcoords_core::resolve::{ResolveError, resolve};
 use pixelcoords_core::session::SessionFile;
+use pixelcoords_core::space::{Origin, Resolved};
 
 use crate::convert::{ResolvedPoint, Space, to_space};
 use crate::flow::{Flow, Step};
@@ -64,43 +67,63 @@ pub fn plan(flow: &Flow, session: &SessionFile, space: Space) -> Result<Plan, Pl
     Ok(Plan { steps })
 }
 
-/// The point a labeled region will be acted on: its click point —
-/// `pixelcoords-core`'s own interior-point logic, never reimplemented
-/// here — translated to global coordinates and converted to `space`.
+/// Nothing has relocated when a plan is built — `plan` never captures.
+/// `run` corrects for drift afterwards, against a fresh `find`.
+const NO_DRIFT: &dyn Fn(usize) -> Option<(f64, Delta)> = &|_| None;
+
+/// The point a labeled region will be acted on.
+///
+/// The label lookup, the monitor lookup, the interior click point and the
+/// hop from monitor-local to global coordinates are all
+/// `pixelcoords_core::resolve`'s. `design/08` calls that the seam, and
+/// says why: reassembling it here means this tool can get DPI wrong in a
+/// way the crate that owns the geometry cannot.
+///
+/// **What stays ours is the refusal.** `resolve` answers in the monitor a
+/// selection *claims*; a point that lands in a gap between monitors, or
+/// past the edge of every one, is still something to refuse rather than
+/// guess at — so the containing-monitor check runs on the physical answer
+/// before any conversion, and `to_space` converts against the monitor
+/// that actually holds the point.
 fn resolve_label(
     session: &SessionFile,
     label: &str,
     space: Space,
 ) -> Result<ResolvedPoint, PlanError> {
-    let selection = session
-        .selections
-        .iter()
-        .find(|s| s.label.eq_ignore_ascii_case(label))
+    let resolved = resolve(
+        session,
+        Some(label),
+        Origin::Global,
+        Resolved::Physical,
+        NO_DRIFT,
+    )
+    .map_err(|error| match error {
+        ResolveError::UnknownMonitor { monitor, .. } => PlanError::UnknownMonitor {
+            label: label.to_string(),
+            monitor,
+        },
+        // NoSelections, UnknownLabel, and the two window-space errors all
+        // mean the same thing to a caller here: that label is not
+        // actionable. Ours names the alternatives; `Origin::Global` never
+        // reaches the window-space pair.
+        _ => PlanError::UnknownLabel {
+            label: label.to_string(),
+            available: available_labels(session),
+        },
+    })?;
+
+    let point = resolved
+        .first()
         .ok_or_else(|| PlanError::UnknownLabel {
             label: label.to_string(),
             available: available_labels(session),
-        })?;
+        })?
+        .point;
 
-    let monitor = session
-        .monitors
-        .iter()
-        .find(|m| m.index == selection.monitor)
-        .ok_or_else(|| PlanError::UnknownMonitor {
-            label: label.to_string(),
-            monitor: selection.monitor,
-        })?;
-
-    // click_point works in the shape's own (monitor-local) space; add the
-    // monitor origin to reach the global desktop grid the conversion and
-    // the input APIs both use.
-    let local = selection.px.click_point();
-    let global_x = monitor.origin_px.x + local.x;
-    let global_y = monitor.origin_px.y + local.y;
-
-    to_space(&session.monitors, global_x, global_y, space).ok_or(PlanError::PointOffscreen {
+    to_space(&session.monitors, point.x, point.y, space).ok_or(PlanError::PointOffscreen {
         label: label.to_string(),
-        x: global_x,
-        y: global_y,
+        x: point.x,
+        y: point.y,
     })
 }
 
@@ -302,11 +325,21 @@ mod tests {
         ));
     }
 
+    /// Both `px` and `global_px` move, because a session that pixelcoords
+    /// wrote keeps them in step — `global_px` is the monitor-local shape
+    /// already translated, not an independent field.
+    ///
+    /// That distinction is new. Global answers now come from `global_px`
+    /// via `pixelcoords_core::resolve` instead of being re-derived here as
+    /// `monitor.origin_px + px.click_point()`, so moving only `px` no
+    /// longer moves the answer. Re-deriving what the session already
+    /// states was exactly the reassembly `design/08` wanted gone.
     #[test]
     fn a_point_outside_every_monitor_is_refused_rather_than_guessed() {
         let mut broken = session();
-        // Move the region past the right edge of every described monitor.
+        // Past the right edge of every described monitor.
         broken.selections[0].px = Shape::Rect(Rect::new(99_000, 400, 10, 10));
+        broken.selections[0].global_px = Shape::Rect(Rect::new(99_000, 400, 10, 10));
         let error = plan(
             &flow("[[step]]\naction = \"click\"\ntarget = \"submit\"\n"),
             &broken,
@@ -314,5 +347,30 @@ mod tests {
         )
         .expect_err("should refuse");
         assert!(matches!(error, PlanError::PointOffscreen { .. }));
+    }
+
+    /// The rounding rule, pinned. A physical coordinate that does not
+    /// divide evenly rounds to the nearest logical point rather than
+    /// truncating toward zero, which is both what
+    /// `pixelcoords resolve --units auto` answers and the more accurate
+    /// of the two once an injector converts to an integer anyway.
+    #[test]
+    fn an_odd_physical_coordinate_rounds_rather_than_truncating() {
+        let mut odd = session();
+        // Height 70 puts the click point at y = 400 + 35 = 435 physical —
+        // odd, so scale 2.0 cannot divide it evenly. x stays even, so only
+        // one axis is under test.
+        odd.selections[0].px = Shape::Rect(Rect::new(800, 400, 100, 70));
+        odd.selections[0].global_px = Shape::Rect(Rect::new(800, 400, 100, 70));
+        let plan = plan(
+            &flow("[[step]]\naction = \"click\"\ntarget = \"submit\"\n"),
+            &odd,
+            Space::Logical,
+        )
+        .expect("planned");
+        let point = plan.steps[0].points[0];
+        // 435 / 2.0 = 217.5. Rounds to 218; truncating gave 217.
+        assert!((point.y - 218.0).abs() < f64::EPSILON, "{}", point.y);
+        assert!((point.x - 425.0).abs() < f64::EPSILON, "{}", point.x);
     }
 }

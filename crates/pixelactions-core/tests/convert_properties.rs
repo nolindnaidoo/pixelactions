@@ -43,21 +43,56 @@ proptest! {
         prop_assert_eq!(found.expect("checked").index, 0);
     }
 
-    /// Logical conversion is reversible: multiply back by the scale and
-    /// the original physical coordinate returns. Rounding is the enemy of
-    /// a click landing where it was aimed.
+    /// Logical conversion is reversible **to within half a logical point**:
+    /// multiply back by the scale and the original physical coordinate
+    /// returns, off by no more than the rounding that produced it.
+    ///
+    /// This property used to demand exactness, on the argument that
+    /// rounding is the enemy of a click landing where it was aimed. The
+    /// argument does not survive contact with the injectors: every one of
+    /// them converts to an integer before synthesizing anything, so the
+    /// fraction this preserved was never spent, only discarded a step
+    /// later — and macOS discarded it by truncating, which is strictly
+    /// worse. At scale 3.0 a physical 1625 truncated to 1623 and rounds to
+    /// 1626: two pixels of error against one.
+    ///
+    /// So the exact version was testing a purity the acting path threw
+    /// away. What is worth guaranteeing is the bound, and the bound is
+    /// half a logical point.
     #[test]
-    fn logical_conversion_is_reversible(
+    fn logical_conversion_is_reversible_within_half_a_point(
         dx in 0i32..3_000,
         dy in 0i32..2_000,
         scale in prop::sample::select(vec![1.0f64, 1.5, 2.0, 3.0]),
     ) {
         let monitors = vec![monitor(0, (0, 0), (4_000, 3_000), scale)];
         let point = to_space(&monitors, dx, dy, Space::Logical).expect("inside");
+        let tolerance = scale / 2.0 + 1e-9;
         let back_x = point.x * scale;
         let back_y = point.y * scale;
-        prop_assert!((back_x - f64::from(dx)).abs() < 1e-9, "x round-trip: {back_x} vs {dx}");
-        prop_assert!((back_y - f64::from(dy)).abs() < 1e-9, "y round-trip: {back_y} vs {dy}");
+        prop_assert!(
+            (back_x - f64::from(dx)).abs() <= tolerance,
+            "x round-trip: {back_x} vs {dx} (tolerance {tolerance})"
+        );
+        prop_assert!(
+            (back_y - f64::from(dy)).abs() <= tolerance,
+            "y round-trip: {back_y} vs {dy} (tolerance {tolerance})"
+        );
+    }
+
+    /// The answer is always a whole coordinate — the property that makes
+    /// the bound above meaningful rather than a licence to drift.
+    #[test]
+    fn a_converted_point_is_always_whole(
+        dx in 0i32..3_000,
+        dy in 0i32..2_000,
+        scale in prop::sample::select(vec![1.0f64, 1.5, 2.0, 3.0]),
+        space in prop::sample::select(vec![Space::Logical, Space::Physical, Space::Auto]),
+    ) {
+        let monitors = vec![monitor(0, (0, 0), (4_000, 3_000), scale)];
+        let point = to_space(&monitors, dx, dy, space).expect("inside");
+        prop_assert!((point.x.fract()).abs() < f64::EPSILON, "x not whole: {}", point.x);
+        prop_assert!((point.y.fract()).abs() < f64::EPSILON, "y not whole: {}", point.y);
     }
 
     /// Physical space never changes a coordinate, whatever the monitor's
