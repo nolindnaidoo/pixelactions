@@ -75,6 +75,27 @@ each region **where the session recorded it**, in one process, parsing the
 session once. `design/08` said this in advance: *"pixelactions' `wait_for`
 step should call it, not reimplement it."*
 
+Measured against a real session on a 3600x2338 frame, macOS, with a 5s
+timeout and a 100ms interval:
+
+| | per poll | polls in the budget | wall clock |
+|---|---|---|---|
+| before, `find` per poll | 3250 ms | **2** | ~6.6 s |
+| after, one `wait` | 136 ms | **51** | 6.96 s |
+
+The point is the middle column, not the first. A `wait_for` used to get
+two looks at the screen before giving up; it now gets fifty-one in the
+same wall time. For a synchronization primitive that is a correctness
+difference, not a speed one — two samples of a UI settling is close to
+not watching it at all.
+
+**`timeout_ms` bounds polls, not seconds.** pixelcoords turns the timeout
+into a poll budget up front — deliberately, so a slow machine gets the
+same number of chances rather than fewer — so a 5s timeout took 6.96s
+above. The old loop overshot too (it checked the deadline after each
+poll, hence ~6.6s), so this is not new, but it is now the documented
+reason rather than an accident. `WATCHDOG` still bounds the whole run.
+
 The threshold does not change. `--min-score` is deliberately not passed,
 so it stays at pixelcoords' default of 0.9 — the same floor `find` applies
 internally.
