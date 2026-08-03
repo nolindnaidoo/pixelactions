@@ -185,6 +185,7 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
             // Preflight just swept every region this run will act on.
             checked: flow.settings.relocate,
             progress,
+            waiter: run::real_waiter(),
         },
         &mut verifier,
     );

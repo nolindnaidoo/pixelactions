@@ -208,6 +208,7 @@ impl Server<'_> {
                 // Each request answers with its own response; there is no
                 // second channel to narrate into.
                 progress: run::silent(),
+                waiter: run::real_waiter(),
             },
             &mut verifier,
         );

@@ -230,40 +230,66 @@ fn poll_until(
     session: &Path,
     target: &str,
     want_present: bool,
+    waiter: &Waiter<'_>,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
-    let started = Instant::now();
-    let deadline = started + Duration::from_millis(flow.settings.timeout_ms);
-    let interval = Duration::from_millis(flow.settings.poll_ms.max(1));
-    let mut polls = 0_u32;
-    let mut best = 0.0_f64;
-    let mut last_look = "the report never mentioned it".to_string();
-    loop {
-        let report = verifier(session, Some(target))?;
-        polls += 1;
-        if let Some(result) = report.result_for(target) {
-            best = best.max(result.score);
-            last_look = describe(result);
+    let report = waiter(
+        session,
+        target,
+        want_present,
+        Duration::from_millis(flow.settings.timeout_ms),
+        Duration::from_millis(flow.settings.poll_ms.max(1)),
+    )?;
+    if report.ok {
+        return Ok(StepOutcome::Verified);
+    }
+
+    // Out of budget. A timeout without evidence is the complaint that
+    // fills pyautogui's issue tracker: "not found" tells you nothing about
+    // whether you were one pixel off or looking at the wrong screen.
+    //
+    // So spend one full-frame search — the expensive kind, once, when the
+    // answer is already bad — to say *which* of those it was. `wait` scores
+    // each region where the session left it, so it cannot see a region
+    // that moved; `find` can, and "it is there, it moved by (dx, dy)" is
+    // the difference between a user guessing and a user fixing.
+    let wanted = if want_present { "appear" } else { "disappear" };
+    let last_look = drift_note(session, target, verifier);
+    bail!(
+        "timed out after {}ms waiting for {target:?} to {wanted} \
+         ({} polls, best match score {:.3}) — {last_look}",
+        report.elapsed_ms,
+        report.polls,
+        report.best_score(),
+    );
+}
+
+/// One `find` after a timeout, purely to describe what was there.
+///
+/// A broken verifier must not replace the timeout with its own error: the
+/// timeout is the real answer and the caller needs it, so a failure to
+/// elaborate degrades to saying nothing extra.
+fn drift_note(
+    session: &Path,
+    target: &str,
+    verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
+) -> String {
+    let Ok(report) = verifier(session, Some(target)) else {
+        return "a follow-up look failed too".to_string();
+    };
+    let Some(result) = report.result_for(target) else {
+        return "the report never mentioned it".to_string();
+    };
+    match result.delta {
+        Some(delta) if result.found && !result.ambiguous && (delta.dx != 0 || delta.dy != 0) => {
+            format!(
+                "last look: {} — it is on screen, {} physical px from where it was marked, \
+                 so `wait` was watching the old position",
+                describe(result),
+                format_args!("({}, {})", delta.dx, delta.dy),
+            )
         }
-        if report.is_confirmed(target) == want_present {
-            return Ok(StepOutcome::Verified);
-        }
-        if Instant::now() >= deadline {
-            // A timeout without evidence is the complaint that fills
-            // pyautogui's issue tracker: "not found" tells you nothing
-            // about whether you were one pixel off or looking at the
-            // wrong screen. The last look matters as much as the score —
-            // a region that matched *perfectly in three places* is a
-            // different problem from one that never appeared, and the
-            // score alone cannot tell them apart.
-            let wanted = if want_present { "appear" } else { "disappear" };
-            bail!(
-                "timed out after {}ms waiting for {target:?} to {wanted} \
-                 ({polls} polls, best match score {best:.3}) — last look: {last_look}",
-                started.elapsed().as_millis()
-            );
-        }
-        std::thread::sleep(interval);
+        _ => format!("last look: {}", describe(result)),
     }
 }
 
@@ -356,6 +382,26 @@ pub struct Context<'a> {
     /// tool that prints nothing until it is done looks hung. The report is
     /// still returned whole; this is how a caller shows it arriving.
     pub progress: &'a dyn Fn(&StepReport),
+    /// Blocks until a region matches again, or stops. The second seam
+    /// beside the verifier, and it lives here rather than as another
+    /// argument because `execute` is already at its argument limit.
+    ///
+    /// `Fn` rather than `FnMut`: a wait is now a single call that blocks,
+    /// so nothing on this side counts iterations any more —
+    /// `pixelcoords wait` owns the loop.
+    pub waiter: &'a Waiter<'a>,
+}
+
+/// Blocks until `label` matches its saved crop again (`true`) or stops
+/// matching (`false`), within a timeout, polling at an interval.
+pub type Waiter<'a> =
+    dyn Fn(&Path, &str, bool, Duration, Duration) -> Result<verify::WaitReport> + 'a;
+
+/// The waiter every real caller wants: `pixelcoords wait` itself.
+pub fn real_waiter() -> &'static Waiter<'static> {
+    &|session, label, want_present, timeout, interval| {
+        verify::wait(session, label, want_present, timeout, interval)
+    }
 }
 
 /// A `progress` that reports nowhere, for callers that only want the
@@ -377,6 +423,7 @@ pub fn execute(
         corrections,
         checked,
         progress,
+        waiter,
     } = *context;
     let started = Instant::now();
     let settle = Duration::from_millis(flow.settings.settle_ms);
@@ -438,7 +485,7 @@ pub fn execute(
         fresh = false;
         let points = corrected_points(planned, &corrections);
         let outcome = perform(injector, &planned.step, planned, &points, settle)
-            .and_then(|()| confirm(flow, &planned.step, session, verifier));
+            .and_then(|()| confirm(flow, &planned.step, session, waiter, verifier));
         let elapsed = step_started.elapsed().as_millis() as u64;
 
         let done = match outcome {
@@ -582,11 +629,12 @@ fn confirm(
     flow: &Flow,
     step: &Step,
     session: &Path,
+    waiter: &Waiter<'_>,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
     match step {
-        Step::WaitFor { target } => poll_until(flow, session, target, true, verifier),
-        Step::WaitGone { target } => poll_until(flow, session, target, false, verifier),
+        Step::WaitFor { target } => poll_until(flow, session, target, true, waiter, verifier),
+        Step::WaitGone { target } => poll_until(flow, session, target, false, waiter, verifier),
         Step::Verify { target } => check_once(session, target, verifier),
         _ => Ok(StepOutcome::Executed),
     }
@@ -692,6 +740,40 @@ mod tests {
         |_, label| Ok(report_of(label, false))
     }
 
+    /// A waiter whose condition holds immediately — the default for every
+    /// test that is not about waiting.
+    fn waits_ok() -> &'static Waiter<'static> {
+        &|_, _, _, _, _| {
+            Ok(verify::WaitReport {
+                ok: true,
+                polls: 1,
+                elapsed_ms: 0,
+                results: vec![verify::WaitResult { score: 1.0 }],
+            })
+        }
+    }
+
+    /// A waiter that never sees its condition hold: `pixelcoords wait`
+    /// spent its whole budget and reported `ok: false`.
+    ///
+    /// `polls` is derived from the budget the same way `wait` derives it,
+    /// so the number in a timeout message is the one a real run would
+    /// carry rather than a constant that happens to look plausible.
+    fn waits_out(score: f64) -> &'static Waiter<'static> {
+        Box::leak(Box::new(
+            move |_: &Path, _: &str, _: bool, timeout: Duration, interval: Duration| {
+                let polls = u32::try_from(timeout.as_millis() / interval.as_millis().max(1))
+                    .unwrap_or(u32::MAX);
+                Ok(verify::WaitReport {
+                    ok: false,
+                    polls,
+                    elapsed_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                    results: vec![verify::WaitResult { score }],
+                })
+            },
+        ))
+    }
+
     #[test]
     fn a_click_moves_then_clicks_in_that_order() {
         let mut injector = Recording::default();
@@ -714,6 +796,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -751,6 +834,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -797,6 +881,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -861,6 +946,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -896,6 +982,7 @@ mod tests {
                 corrections: &corrections,
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -926,6 +1013,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -965,6 +1053,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut once,
         );
@@ -1001,6 +1090,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -1031,6 +1121,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -1082,6 +1173,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut never_found(),
         );
@@ -1120,6 +1212,7 @@ mod tests {
                     corrections: &Corrections::new(),
                     checked: false,
                     progress: silent(),
+                    waiter: waits_ok(),
                 },
                 &mut always_found(),
             );
@@ -1161,6 +1254,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut once,
         );
@@ -1215,6 +1309,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut drifting,
         );
@@ -1248,6 +1343,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut never_found(),
         );
@@ -1323,6 +1419,7 @@ mod tests {
                 corrections: &corrections,
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut moved_up(),
         );
@@ -1419,6 +1516,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut appears_after(3),
         );
@@ -1451,6 +1549,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_out(0.42),
             },
             &mut never_found(),
         );
@@ -1494,6 +1593,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut ambiguous,
         );
@@ -1526,6 +1626,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_out(0.10),
             },
             &mut never_found(),
         );
@@ -1535,6 +1636,54 @@ mod tests {
         assert!(
             detail.contains("appear"),
             "says what it waited for: {detail}"
+        );
+    }
+
+    /// The reason a timeout still spends one full-frame `find`.
+    ///
+    /// `pixelcoords wait` scores a region where the session left it, so a
+    /// region that *moved* looks identical to one that never appeared —
+    /// both are "did not match". `find` searches the whole frame and can
+    /// tell those apart, and which one it was is the difference between a
+    /// user guessing and a user fixing. Paid once, when the answer is
+    /// already bad.
+    #[test]
+    fn a_timeout_on_a_region_that_moved_says_so() {
+        let flow = waiting_flow("[[step]]\naction = \"wait_for\"\ntarget = \"submit\"\n", 5);
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::WaitFor {
+                    target: "submit".into(),
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: false,
+                progress: silent(),
+                waiter: waits_out(0.05),
+            },
+            // `wait` never matched, but a full-frame look finds it 120 px up.
+            &mut moved_up(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+        let detail = report.steps[0].detail.clone().expect("explained");
+        assert!(detail.contains("timed out"), "detail: {detail}");
+        assert!(
+            detail.contains("it is on screen"),
+            "distinguishes moved from absent: {detail}"
+        );
+        assert!(
+            detail.contains("(0, -120)"),
+            "names the drift so it can be fixed: {detail}"
         );
     }
 
@@ -1563,6 +1712,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut never_found(),
         );
@@ -1600,6 +1750,7 @@ mod tests {
                 corrections: &corrections,
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );
@@ -1647,6 +1798,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut never_found(),
         );
@@ -1675,6 +1827,7 @@ mod tests {
                 corrections: &Corrections::new(),
                 checked: false,
                 progress: silent(),
+                waiter: waits_ok(),
             },
             &mut always_found(),
         );

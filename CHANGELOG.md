@@ -63,6 +63,59 @@ of being re-derived as `monitor.origin_px + px.click_point()`. For a
 session pixelcoords wrote these agree — it is the same shape, already
 translated — and not re-deriving it is the point.
 
+### `wait` and `gone` stop re-searching the whole screen
+
+`wait_for` and `wait_gone` polled by spawning `pixelcoords find` once per
+iteration. `find` searches the entire frame for a region's saved crop —
+the expensive operation — and each spawn also paid a process start and a
+fresh parse of the session.
+
+They now make a single blocking call to `pixelcoords wait`, which scores
+each region **where the session recorded it**, in one process, parsing the
+session once. `design/08` said this in advance: *"pixelactions' `wait_for`
+step should call it, not reimplement it."*
+
+Measured against a real session on a 3600x2338 frame, macOS, with a 5s
+timeout and a 100ms interval:
+
+| | per poll | polls in the budget | wall clock |
+|---|---|---|---|
+| before, `find` per poll | 3250 ms | **2** | ~6.6 s |
+| after, one `wait` | 136 ms | **51** | 6.96 s |
+
+The point is the middle column, not the first. A `wait_for` used to get
+two looks at the screen before giving up; it now gets fifty-one in the
+same wall time. For a synchronization primitive that is a correctness
+difference, not a speed one — two samples of a UI settling is close to
+not watching it at all.
+
+**`timeout_ms` bounds polls, not seconds.** pixelcoords turns the timeout
+into a poll budget up front — deliberately, so a slow machine gets the
+same number of chances rather than fewer — so a 5s timeout took 6.96s
+above. The old loop overshot too (it checked the deadline after each
+poll, hence ~6.6s), so this is not new, but it is now the documented
+reason rather than an accident. `WATCHDOG` still bounds the whole run.
+
+The threshold does not change. `--min-score` is deliberately not passed,
+so it stays at pixelcoords' default of 0.9 — the same floor `find` applies
+internally.
+
+**A timeout now says whether the region moved.** Scoring in place cannot
+see a region that shifted, so "did not match" covers both "never appeared"
+and "appeared somewhere else". When the budget runs out, one full-frame
+`find` is spent — once, when the answer is already bad — purely to tell
+those apart:
+
+```
+timed out after 5000ms waiting for "submit" to appear (20 polls, best
+match score 0.050) — last look: found (score 0.99) — it is on screen,
+(0, -120) physical px from where it was marked, so `wait` was watching
+the old position
+```
+
+Before, that message could report a score and nothing else. Which of the
+two it was is the difference between a user guessing and a user fixing.
+
 ## 0.4.0 — 2026-07-30
 
 **Windows**, through `SendInput` across the whole virtual desktop. The

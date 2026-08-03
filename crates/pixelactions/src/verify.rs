@@ -11,6 +11,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use pixelcoords_core::geometry::Shape;
@@ -112,6 +113,101 @@ pub fn find(session: &Path, label: Option<&str>) -> Result<FindReport> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     serde_json::from_str(&stdout).context("could not parse the report from pixelcoords find")
+}
+
+/// The subset of `pixelcoords wait --json` this tool reads. Partial for
+/// the same reason `FindReport` is: the report may grow upstream.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WaitReport {
+    /// Whether the condition held before the budget ran out. This is the
+    /// answer; the rows below are the evidence for it.
+    pub ok: bool,
+    #[serde(default)]
+    pub polls: u32,
+    #[serde(default)]
+    pub elapsed_ms: u64,
+    #[serde(default)]
+    pub results: Vec<WaitResult>,
+}
+
+/// Only the score. `label` and `matching` are in the JSON and are
+/// deliberately not parsed: a wait here always targets one label, so the
+/// name adds nothing, and `matching` is the per-region form of the `ok`
+/// this code already reads. Serde ignores what a struct does not name.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WaitResult {
+    #[serde(default)]
+    pub score: f64,
+}
+
+impl WaitReport {
+    /// The best score any watched region reached — what to say when the
+    /// wait ran out and the caller wants to know how close it got.
+    #[must_use]
+    pub fn best_score(&self) -> f64 {
+        self.results.iter().map(|r| r.score).fold(0.0_f64, f64::max)
+    }
+}
+
+/// Block on `pixelcoords wait` until a region matches again, or stops.
+///
+/// **The polling lives there, not here.** `wait` scores each region at the
+/// position the session recorded, in one process that parses the session
+/// once; the loop this replaced spawned `pixelcoords find` per iteration,
+/// and `find` searches the whole frame — hundreds of milliseconds to over
+/// a second each, against microseconds for a score in place.
+///
+/// It also turns the timeout into a **poll budget** up front rather than
+/// consulting a clock, which is the more honest primitive: a wall-clock
+/// deadline gives the UI fewer chances exactly when the machine is
+/// slowest.
+///
+/// Exit 1 is a timeout — an answer, carried in `ok`, not an error. Only
+/// exit 2 means the question could not be asked.
+pub fn wait(
+    session: &Path,
+    label: &str,
+    want_present: bool,
+    timeout: Duration,
+    interval: Duration,
+) -> Result<WaitReport> {
+    let mut command = Command::new("pixelcoords");
+    command
+        .arg("wait")
+        .arg("--session")
+        .arg(session)
+        .arg("--label")
+        .arg(label)
+        .arg("--for")
+        .arg(if want_present { "match" } else { "change" })
+        .arg("--timeout")
+        .arg(millis(timeout))
+        .arg("--interval")
+        .arg(millis(interval));
+    // `--min-score` is deliberately not passed. Its default there is 0.9,
+    // which is the same floor `find` applies internally — so the threshold
+    // a wait uses does not change by moving the loop. Making it tunable
+    // would be a new flow-file field, and that is a feature, not this.
+
+    let output = command.output().context(
+        "cannot run `pixelcoords` — it must be on PATH to wait on a region \
+         (cargo install pixelcoords)",
+    )?;
+
+    if output.status.code() == Some(2) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("pixelcoords wait refused: {}", stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout).context("could not parse the report from pixelcoords wait")
+}
+
+/// A duration in the grammar pixelcoords parses: one integer, one unit,
+/// no decimals and no compounds. Milliseconds is the unit every value
+/// this tool holds is already in.
+fn millis(duration: Duration) -> String {
+    format!("{}ms", duration.as_millis())
 }
 
 #[cfg(test)]
