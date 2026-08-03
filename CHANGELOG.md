@@ -63,6 +63,38 @@ of being re-derived as `monitor.origin_px + px.click_point()`. For a
 session pixelcoords wrote these agree — it is the same shape, already
 translated — and not re-deriving it is the point.
 
+### `wait` and `gone` stop re-searching the whole screen
+
+`wait_for` and `wait_gone` polled by spawning `pixelcoords find` once per
+iteration. `find` searches the entire frame for a region's saved crop —
+the expensive operation — and each spawn also paid a process start and a
+fresh parse of the session.
+
+They now make a single blocking call to `pixelcoords wait`, which scores
+each region **where the session recorded it**, in one process, parsing the
+session once. `design/08` said this in advance: *"pixelactions' `wait_for`
+step should call it, not reimplement it."*
+
+The threshold does not change. `--min-score` is deliberately not passed,
+so it stays at pixelcoords' default of 0.9 — the same floor `find` applies
+internally.
+
+**A timeout now says whether the region moved.** Scoring in place cannot
+see a region that shifted, so "did not match" covers both "never appeared"
+and "appeared somewhere else". When the budget runs out, one full-frame
+`find` is spent — once, when the answer is already bad — purely to tell
+those apart:
+
+```
+timed out after 5000ms waiting for "submit" to appear (20 polls, best
+match score 0.050) — last look: found (score 0.99) — it is on screen,
+(0, -120) physical px from where it was marked, so `wait` was watching
+the old position
+```
+
+Before, that message could report a score and nothing else. Which of the
+two it was is the difference between a user guessing and a user fixing.
+
 ## 0.4.0 — 2026-07-30
 
 **Windows**, through `SendInput` across the whole virtual desktop. The
