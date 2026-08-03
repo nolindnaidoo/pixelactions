@@ -282,10 +282,11 @@ fn drift_note(
     };
     match result.delta {
         Some(delta) if result.found && !result.ambiguous && (delta.dx != 0 || delta.dy != 0) => {
+            // `describe` already names the offset, so do not repeat it —
+            // say what it *means*, which is the part a reader is missing.
             format!(
-                "last look: {} — it is on screen, {} physical px from where it was marked, \
-                 so `wait` was watching the old position",
-                describe(result),
+                "last look: it is on screen, {} physical px from where it was marked, \
+                 so `wait` was scoring the old position",
                 format_args!("({}, {})", delta.dx, delta.dy),
             )
         }
