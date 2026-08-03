@@ -33,6 +33,36 @@ That is the additive-only promise in `design/08` surviving a real test
 rather than merely being stated, and it is worth writing down as
 evidence.
 
+### `resolve` is pixelcoords' again, and clicks land where it says
+
+The click point, the label lookup, the monitor lookup and the hop from
+monitor-local to global coordinates now come from
+`pixelcoords_core::resolve`. `design/08` called that the seam and said
+why: reassembling it here is how a consumer gets DPI wrong in a way the
+crate that owns the geometry cannot. The per-platform units rule — macOS
+logical, Windows and X11 physical — is likewise read from
+`pixelcoords_core::space` rather than restated here.
+
+**A resolved point is now a whole coordinate, and on macOS that can move
+a click by one logical point.** The conversion used to divide in `f64` and
+keep the fraction, on the argument that rounding is the enemy of a click
+landing where it was aimed. Measured at the boundary that decides
+anything, it is the reverse: every injector converts to an integer before
+synthesizing, macOS by truncating, so the fraction was never spent — it
+was discarded one step later, less accurately. At scale 3.0 a physical
+1625 truncated to 1623 where rounding gives 1626: two pixels of error
+against one.
+
+The visible effect is that the two halves of the loop stop disagreeing.
+Against the same session on a 2x display, `pixelcoords resolve --units
+auto` and `pixelactions plan` both now answer `(297, 235)`; before, this
+tool said `234`.
+
+Global answers also come from the session's recorded `global_px` instead
+of being re-derived as `monitor.origin_px + px.click_point()`. For a
+session pixelcoords wrote these agree — it is the same shape, already
+translated — and not re-deriving it is the point.
+
 ## 0.4.0 — 2026-07-30
 
 **Windows**, through `SendInput` across the whole virtual desktop. The

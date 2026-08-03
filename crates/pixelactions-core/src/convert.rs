@@ -13,7 +13,9 @@
 //! Getting this wrong doesn't error — it clicks the wrong place, which is
 //! why the conversion lives here, alone, and is property-tested.
 
+use pixelcoords_core::geometry::Point;
 use pixelcoords_core::session::MonitorRecord;
+use pixelcoords_core::space::{Platform, Resolved, Units, logical_of};
 use serde::{Deserialize, Serialize};
 
 /// The coordinate space a consumer wants a point in.
@@ -40,13 +42,30 @@ pub struct ResolvedPoint {
     pub scale: f64,
 }
 
-/// The space `Space::Auto` resolves to on the platform this was compiled
-/// for. Stated once, here, so no call site guesses.
-pub const fn native_space() -> Space {
+/// The OS this was compiled for, as `pixelcoords-core` names it.
+const fn native_platform() -> Platform {
     if cfg!(target_os = "macos") {
-        return Space::Logical;
+        return Platform::MacOs;
     }
-    Space::Physical
+    if cfg!(target_os = "windows") {
+        return Platform::Windows;
+    }
+    Platform::Linux
+}
+
+/// The space `Space::Auto` resolves to on the platform this was compiled
+/// for. Stated once — **and not here**.
+///
+/// The rule (macOS logical, Windows and X11 physical) belongs to
+/// `pixelcoords_core::space::Units`, which is where `pixelcoords resolve`
+/// and `emit`'s per-format table read it from. This function used to
+/// state it a second time, in a second repository, with its own comment
+/// explaining it. Two copies of one rule is one rule and one future bug.
+pub const fn native_space() -> Space {
+    match Units::Auto.resolve(native_platform()) {
+        Resolved::Logical => Space::Logical,
+        Resolved::Physical => Space::Physical,
+    }
 }
 
 /// Which monitor contains a global physical point.
@@ -73,7 +92,20 @@ pub fn monitor_at(
 /// monitor that contains it.
 ///
 /// Logical conversion divides by that monitor's scale — per monitor, not
-/// per desktop, so mixed-DPI layouts come out right.
+/// per desktop, so mixed-DPI layouts come out right. The division is
+/// `pixelcoords_core::space::logical_of`, so this tool and
+/// `pixelcoords resolve` cannot answer the same question differently.
+///
+/// **The answer is a whole coordinate, and that is a change.** This used
+/// to divide in `f64` and carry the fraction, on the argument that
+/// rounding is the enemy of a click landing where it was aimed. Measured
+/// at the boundary that actually matters, it is the other way round:
+/// every injector converts to an integer before it synthesizes anything,
+/// macOS by truncating, so the fraction was never spent — it was
+/// discarded, one step later, less accurately. Truncating is never better
+/// than rounding and is sometimes twice as bad (scale 3.0, physical 1625:
+/// 2 px of error against 1). Rounding once, here, is both more accurate
+/// and the same answer `pixelcoords resolve --units auto` gives.
 pub fn to_space(
     monitors: &[MonitorRecord],
     global_x: i32,
@@ -85,13 +117,14 @@ pub fn to_space(
         Space::Auto => native_space(),
         other => other,
     };
-    let divisor = match resolved {
-        Space::Logical => monitor.scale,
-        _ => 1.0,
+    let physical = Point::new(global_x, global_y);
+    let point = match resolved {
+        Space::Logical => logical_of(physical, monitor.scale),
+        _ => physical,
     };
     Some(ResolvedPoint {
-        x: f64::from(global_x) / divisor,
-        y: f64::from(global_y) / divisor,
+        x: f64::from(point.x),
+        y: f64::from(point.y),
         space: resolved,
         monitor: monitor.index,
         scale: monitor.scale,
