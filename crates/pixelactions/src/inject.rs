@@ -1029,9 +1029,18 @@ mod platform {
     }
 
     impl Injector for RealInjector {
+        /// Rounds, like the other three injectors.
+        ///
+        /// This truncated until 0.5.0, which was the odd one out and the
+        /// worse rule: at scale 3.0 a physical 1625 truncates to 1623 and
+        /// rounds to 1626 — two pixels of error against one. Resolved
+        /// points arrive whole now, so the endpoints of a click were
+        /// already unaffected; what still reached here fractional was
+        /// **drag interpolation**, which computes intermediate positions
+        /// as `from + (to - from) * progress`.
         fn move_to(&mut self, x: f64, y: f64) -> Result<()> {
             self.enigo
-                .move_mouse(x as i32, y as i32, Coordinate::Abs)
+                .move_mouse(x.round() as i32, y.round() as i32, Coordinate::Abs)
                 .map_err(|e| anyhow!("move to ({x:.0}, {y:.0}) failed: {e}"))
         }
 

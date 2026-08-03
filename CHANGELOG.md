@@ -63,6 +63,19 @@ of being re-derived as `monitor.origin_px + px.click_point()`. For a
 session pixelcoords wrote these agree — it is the same shape, already
 translated — and not re-deriving it is the point.
 
+### macOS rounds a coordinate like the other three injectors
+
+`RealInjector::move_to` truncated (`as i32`) where Wayland, X11 and
+Windows all round. It was the odd one out and the worse rule: at scale
+3.0 a physical 1625 truncates to 1623 and rounds to 1626 — two pixels of
+error against one.
+
+Resolved points arrive whole now, so a click's endpoint was already
+unaffected by this. What still reached the injector fractional was **drag
+interpolation**, which computes intermediate positions as
+`from + (to - from) * progress`. Those are now rounded too, so all four
+platforms turn a coordinate into an integer the same way.
+
 ### `wait` and `gone` stop re-searching the whole screen
 
 `wait_for` and `wait_gone` polled by spawning `pixelcoords find` once per
