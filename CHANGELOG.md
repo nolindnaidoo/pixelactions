@@ -6,6 +6,47 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## Unreleased — 0.6.0
+
+### `changed` — proving an action did something
+
+`verify` confirms a region still matches what you marked. Nothing
+confirmed the opposite, which is the more useful question after acting:
+*did that click do anything at all?*
+
+```
+pixelactions run --session <dir> click:submit changed:panel --yes
+```
+
+```toml
+[[step]]
+action = "changed"
+target = "panel"
+tolerance = 2.5   # optional; percent of the region's pixels, default 0
+```
+
+**It is not `verify` with the sign flipped.** `verify`, `wait` and `find`
+all score by normalized cross-correlation, which is brightness- and
+contrast-normalized — a region that changes *uniformly*, like a backdrop
+dimming behind a modal, still scores ~1.0 and still counts as matching.
+`changed` compares RGB directly through `pixelcoords diff`, so it sees
+precisely the case correlation is blind to. `design/08` filed this under
+"consume, don't rebuild".
+
+`tolerance` defaults to `0` — any pixel. That is the right default for
+"did anything happen": if the action did nothing, nothing differs. Raise
+it when something unrelated lives in the region; a blinking text caret is
+enough to register on its own.
+
+A step that finds nothing changed **fails the run**, and says how little
+moved rather than only refusing:
+
+```
+region "panel" did not change — 0 of 7503 pixels differ (0.000%)
+```
+
+Like `verify`, `wait` and `gone`, it injects nothing.
+
 ## 0.5.0 — 2026-08-03
 
 **The seam closes.** `design/08-PIXELCOORDS-CONTRACT.md` decided that this

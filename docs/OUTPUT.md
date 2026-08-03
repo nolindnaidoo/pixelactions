@@ -28,8 +28,8 @@
   the session said it would.
 - **`outcome`** distinguishes:
   - `verified` — an observation step whose condition held: a `verify`,
-    `wait_for`, or `wait_gone`. These are the only steps that assert
-    anything about the screen.
+    `changed`, `wait_for`, or `wait_gone`. These are the only steps that
+    assert anything about the screen.
   - `executed` — the input was posted. **"Nothing errored" is not "it
     worked"**, and this is where that distinction lives. Acting steps
     always report this, never `verified`: a click cannot confirm its own

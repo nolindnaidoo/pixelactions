@@ -203,6 +203,70 @@ pub fn wait(
     serde_json::from_str(&stdout).context("could not parse the report from pixelcoords wait")
 }
 
+/// The subset of `pixelcoords diff --json` this tool reads.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DiffReport {
+    /// Whether every region stayed **within** tolerance. `diff` answers
+    /// "did this stay the same", so a `changed` step wants this false.
+    pub ok: bool,
+    #[serde(default)]
+    pub results: Vec<DiffResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DiffResult {
+    #[serde(default)]
+    pub changed_px: u64,
+    #[serde(default)]
+    pub masked_px: u64,
+    #[serde(default)]
+    pub changed_pct: f64,
+}
+
+impl DiffReport {
+    /// How much the first watched region moved, for a step's detail line.
+    #[must_use]
+    pub fn first(&self) -> Option<&DiffResult> {
+        self.results.first()
+    }
+}
+
+/// Compare a region against the screen now, through `pixelcoords diff`.
+///
+/// **This is the comparison `verify` cannot make.** `find` and `wait` score
+/// by normalized cross-correlation, which is brightness- and
+/// contrast-normalized: a region that changes *uniformly* — a dimming
+/// backdrop, a luminance-only theme switch — still scores ~1.0. `diff`
+/// compares RGB directly, so it sees exactly that.
+///
+/// Shelled out rather than linked, for the same reason as `find`: it needs
+/// a fresh screen capture.
+pub fn diff(session: &Path, label: &str, tolerance: f64) -> Result<DiffReport> {
+    let output = Command::new("pixelcoords")
+        .arg("diff")
+        .arg("--session")
+        .arg(session)
+        .arg("--label")
+        .arg(label)
+        .arg("--tolerance")
+        .arg(format!("{tolerance}"))
+        .output()
+        .context(
+            "cannot run `pixelcoords` — it must be on PATH to compare a region \
+             (cargo install pixelcoords)",
+        )?;
+
+    // Exit 0 within tolerance, 1 outside it; both produce a report. Only 2
+    // means the question could not be asked.
+    if output.status.code() == Some(2) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("pixelcoords diff refused: {}", stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(&stdout).context("could not parse the report from pixelcoords diff")
+}
+
 /// A duration in the grammar pixelcoords parses: one integer, one unit,
 /// no decimals and no compounds. Milliseconds is the unit every value
 /// this tool holds is already in.

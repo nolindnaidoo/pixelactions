@@ -35,9 +35,24 @@ never a silently skipped step.
 | `type` | `text` | Type literal text through the platform's Unicode path |
 | `key` | `chord` | Press a chord, e.g. `cmd+shift+s` |
 | `verify` | `target` | Confirm the region still matches its saved crop |
+| `changed` | `target`, `tolerance?` | Confirm the region **stopped** matching — that something happened |
 | `wait_for` | `target` | Poll until the region appears |
 | `wait_gone` | `target` | Poll until the region disappears |
 | `pause` | `ms` | Wait a fixed duration |
+
+**`verify` and `changed` are not opposites of each other's method.**
+`verify` scores by normalized cross-correlation, which is brightness- and
+contrast-normalized: a region that changes *uniformly* — a dimming
+backdrop behind a modal, a luminance-only theme switch — still scores
+~1.0 and still counts as matching. `changed` compares RGB directly
+through `pixelcoords diff`, so it sees exactly that case. Reach for
+`changed` to prove an action did something; reach for `verify` to prove
+a region is still the one you marked.
+
+`tolerance` is the percentage of the region's masked pixels that must
+differ. It defaults to `0` — any pixel. Raise it when something unrelated
+lives inside the region: a blinking text caret is enough to register on
+its own.
 
 **Text versus chords.** `type` uses the layout-independent Unicode path
 and *cannot* express shortcuts; `key` uses physical keys and modifiers.

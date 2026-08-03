@@ -57,6 +57,7 @@ form of `action = "click"` — so there is one set of verbs to learn.
 | drag | `{"do":"drag","from":"card","to":"bin"}` |
 | scroll | `{"do":"scroll","target":"results","amount":3}` — optional `"axis":"horizontal"` |
 | verify | `{"do":"verify","target":"banner"}` |
+| changed | `{"do":"changed","target":"panel"}` — optional `"tolerance":2.5` |
 | wait for | `{"do":"wait_for","target":"confirmation"}` |
 | wait gone | `{"do":"wait_gone","target":"spinner"}` |
 | pause | `{"do":"pause","ms":250}` |

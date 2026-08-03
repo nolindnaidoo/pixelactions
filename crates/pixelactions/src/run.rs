@@ -391,6 +391,18 @@ pub struct Context<'a> {
     /// so nothing on this side counts iterations any more —
     /// `pixelcoords wait` owns the loop.
     pub waiter: &'a Waiter<'a>,
+    /// Compares a region against the screen now — the RGB comparison the
+    /// correlation-based seams above cannot make.
+    pub differ: &'a Differ<'a>,
+}
+
+/// Compares `label` against the screen, allowing `tolerance` percent of
+/// its masked pixels to differ before it counts as changed.
+pub type Differ<'a> = dyn Fn(&Path, &str, f64) -> Result<verify::DiffReport> + 'a;
+
+/// The differ every real caller wants: `pixelcoords diff` itself.
+pub fn real_differ() -> &'static Differ<'static> {
+    &|session, label, tolerance| verify::diff(session, label, tolerance)
 }
 
 /// Blocks until `label` matches its saved crop again (`true`) or stops
@@ -425,6 +437,7 @@ pub fn execute(
         checked,
         progress,
         waiter,
+        differ,
     } = *context;
     let started = Instant::now();
     let settle = Duration::from_millis(flow.settings.settle_ms);
@@ -486,7 +499,7 @@ pub fn execute(
         fresh = false;
         let points = corrected_points(planned, &corrections);
         let outcome = perform(injector, &planned.step, planned, &points, settle)
-            .and_then(|()| confirm(flow, &planned.step, session, waiter, verifier));
+            .and_then(|()| confirm(flow, &planned.step, session, waiter, differ, verifier));
         let elapsed = step_started.elapsed().as_millis() as u64;
 
         let done = match outcome {
@@ -612,7 +625,10 @@ fn perform(
         Step::Pause { ms } => std::thread::sleep(Duration::from_millis(*ms)),
         // Verification and waiting steps inject nothing; the confirm
         // phase does their work.
-        Step::Verify { .. } | Step::WaitFor { .. } | Step::WaitGone { .. } => {}
+        Step::Verify { .. }
+        | Step::WaitFor { .. }
+        | Step::WaitGone { .. }
+        | Step::Changed { .. } => {}
     }
     std::thread::sleep(settle);
     Ok(())
@@ -631,14 +647,52 @@ fn confirm(
     step: &Step,
     session: &Path,
     waiter: &Waiter<'_>,
+    differ: &Differ<'_>,
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
     match step {
+        Step::Changed { target, tolerance } => check_changed(session, target, *tolerance, differ),
         Step::WaitFor { target } => poll_until(flow, session, target, true, waiter, verifier),
         Step::WaitGone { target } => poll_until(flow, session, target, false, waiter, verifier),
         Step::Verify { target } => check_once(session, target, verifier),
         _ => Ok(StepOutcome::Executed),
     }
+}
+
+/// A `changed` step: prove the region is no longer what it was.
+///
+/// `pixelcoords diff` answers the opposite question — `ok` means every
+/// region stayed *within* tolerance — so this succeeds precisely when that
+/// is false. A step that finds nothing changed fails the run, the same way
+/// a `verify` that finds the region gone does: both are assertions about
+/// the screen, and an assertion that quietly passes is worse than none.
+fn check_changed(
+    session: &Path,
+    target: &str,
+    tolerance: f64,
+    differ: &Differ<'_>,
+) -> Result<StepOutcome> {
+    let report = differ(session, target, tolerance)?;
+    if !report.ok {
+        return Ok(StepOutcome::Verified);
+    }
+    let detail = report.first().map_or_else(
+        || format!("region {target:?} was not in the report"),
+        |r| {
+            format!(
+                "{} of {} pixels differ ({:.3}%)",
+                r.changed_px, r.masked_px, r.changed_pct
+            )
+        },
+    );
+    bail!(
+        "region {target:?} did not change{} — {detail}",
+        if tolerance > 0.0 {
+            format!(" by more than {tolerance}%")
+        } else {
+            String::new()
+        }
+    )
 }
 
 /// A `verify` step: look once, and say what was seen when it is not there.
@@ -754,6 +808,35 @@ mod tests {
         }
     }
 
+    /// A differ reporting the region is unchanged — `pixelcoords diff`
+    /// answers "did it stay the same", so `ok: true` is *no change*.
+    fn sees_no_change() -> &'static Differ<'static> {
+        &|_, _, _| {
+            Ok(verify::DiffReport {
+                ok: true,
+                results: vec![verify::DiffResult {
+                    changed_px: 0,
+                    masked_px: 7503,
+                    changed_pct: 0.0,
+                }],
+            })
+        }
+    }
+
+    /// A differ reporting the region changed past its tolerance.
+    fn sees_change() -> &'static Differ<'static> {
+        &|_, _, _| {
+            Ok(verify::DiffReport {
+                ok: false,
+                results: vec![verify::DiffResult {
+                    changed_px: 1156,
+                    masked_px: 7503,
+                    changed_pct: 15.407,
+                }],
+            })
+        }
+    }
+
     /// A waiter that never sees its condition hold: `pixelcoords wait`
     /// spent its whole budget and reported `ok: false`.
     ///
@@ -798,6 +881,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -836,6 +920,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -883,6 +968,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -948,6 +1034,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -984,6 +1071,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -1015,6 +1103,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -1055,6 +1144,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut once,
         );
@@ -1092,6 +1182,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -1123,6 +1214,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -1175,6 +1267,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut never_found(),
         );
@@ -1214,6 +1307,7 @@ mod tests {
                     checked: false,
                     progress: silent(),
                     waiter: waits_ok(),
+                    differ: sees_no_change(),
                 },
                 &mut always_found(),
             );
@@ -1256,6 +1350,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut once,
         );
@@ -1311,6 +1406,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut drifting,
         );
@@ -1345,6 +1441,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut never_found(),
         );
@@ -1421,6 +1518,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut moved_up(),
         );
@@ -1518,6 +1616,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut appears_after(3),
         );
@@ -1551,6 +1650,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_out(0.42),
+                differ: sees_no_change(),
             },
             &mut never_found(),
         );
@@ -1595,6 +1695,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut ambiguous,
         );
@@ -1628,6 +1729,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_out(0.10),
+                differ: sees_no_change(),
             },
             &mut never_found(),
         );
@@ -1671,6 +1773,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_out(0.05),
+                differ: sees_no_change(),
             },
             // `wait` never matched, but a full-frame look finds it 120 px up.
             &mut moved_up(),
@@ -1686,6 +1789,119 @@ mod tests {
             detail.contains("(0, -120)"),
             "names the drift so it can be fixed: {detail}"
         );
+    }
+
+    #[test]
+    fn a_changed_step_passes_when_the_region_actually_changed() {
+        let flow = waiting_flow(
+            "[[step]]\naction = \"changed\"\ntarget = \"panel\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Changed {
+                    target: "panel".into(),
+                    tolerance: 0.0,
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: false,
+                progress: silent(),
+                waiter: waits_ok(),
+                differ: sees_change(),
+            },
+            &mut always_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Verified);
+    }
+
+    /// The half that makes the verb worth having: an action that did
+    /// nothing must not report success.
+    #[test]
+    fn a_changed_step_fails_when_nothing_moved_and_says_how_little() {
+        let flow = waiting_flow(
+            "[[step]]\naction = \"changed\"\ntarget = \"panel\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Changed {
+                    target: "panel".into(),
+                    tolerance: 0.0,
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: false,
+                progress: silent(),
+                waiter: waits_ok(),
+                differ: sees_no_change(),
+            },
+            &mut always_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+        let detail = report.steps[0].detail.clone().expect("explained");
+        assert!(detail.contains("did not change"), "detail: {detail}");
+        assert!(
+            detail.contains("0 of 7503 pixels"),
+            "quantifies it rather than only refusing: {detail}"
+        );
+    }
+
+    /// `changed` looks; it never injects. The same rule `verify`, `wait`
+    /// and `gone` follow.
+    #[test]
+    fn a_changed_step_injects_nothing() {
+        let flow = waiting_flow(
+            "[[step]]\naction = \"changed\"\ntarget = \"panel\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Changed {
+                    target: "panel".into(),
+                    tolerance: 0.0,
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let mut injector = Recording::default();
+        execute(
+            &mut injector,
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: false,
+                progress: silent(),
+                waiter: waits_ok(),
+                differ: sees_change(),
+            },
+            &mut always_found(),
+        );
+        assert!(injector.events.is_empty(), "{:?}", injector.events);
     }
 
     #[test]
@@ -1714,6 +1930,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut never_found(),
         );
@@ -1752,6 +1969,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
@@ -1800,6 +2018,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut never_found(),
         );
@@ -1829,6 +2048,7 @@ mod tests {
                 checked: false,
                 progress: silent(),
                 waiter: waits_ok(),
+                differ: sees_no_change(),
             },
             &mut always_found(),
         );
