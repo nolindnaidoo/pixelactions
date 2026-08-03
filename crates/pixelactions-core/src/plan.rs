@@ -166,6 +166,7 @@ mod tests {
                     rot_deg: None,
                     window_px: None,
                     crop: "crop-0-submit.png".into(),
+                    color: None,
                 },
                 SelectionRecord {
                     shape: ToolKind::Rect,
@@ -176,8 +177,11 @@ mod tests {
                     rot_deg: None,
                     window_px: None,
                     crop: "crop-1-far.png".into(),
+                    color: None,
                 },
             ],
+            // Rulers are pixelcoords 0.5.0's; nothing here acts on one.
+            measures: Vec::new(),
         }
     }
 

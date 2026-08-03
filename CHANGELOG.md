@@ -6,6 +6,33 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## Unreleased — 0.5.0
+
+**The seam closes.** `design/08-PIXELCOORDS-CONTRACT.md` decided that this
+tool should consume pixelcoords' `resolve`, `wait` and `diff` rather than
+reimplement them — written while all three were still roadmap items over
+there. They shipped, nothing prompted a revisit, and this release is that
+revisit.
+
+### The pixelcoords floor moves to 0.7.0
+
+`pixelcoords-core` goes 0.2 → 0.7, and `doctor`'s `MIN_PIXELCOORDS` goes
+0.1.2 → 0.7.0. **`doctor` now refuses a pixelcoords older than 0.7.0**,
+where before it accepted anything from 0.1.2 up. If you have been running
+an older one, that is the one user-visible change here.
+
+Both pins move together because they are one decision: this tool links
+the crate *and* shells out to the binary, so a crate that knows about
+`resolve` beside a binary that does not is a pairing `doctor` would
+otherwise bless and the run loop would then fail on.
+
+**Nothing needed porting.** Five minor versions of pixelcoords cost three
+struct literals in test fixtures — `color` and `measures`, both additive.
+Schema 1 never moved, and core 0.2 still parses a session 0.7 wrote.
+That is the additive-only promise in `design/08` surviving a real test
+rather than merely being stated, and it is worth writing down as
+evidence.
+
 ## 0.4.0 — 2026-07-30
 
 **Windows**, through `SendInput` across the whole virtual desktop. The
