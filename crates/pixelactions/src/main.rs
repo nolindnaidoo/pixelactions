@@ -5,6 +5,7 @@
 //! permanent, not a phase — a wrong coordinate is a click in the wrong
 //! place, and seeing the numbers first is how that gets caught.
 
+mod audit;
 mod cli;
 mod doctor;
 #[cfg(target_os = "linux")]
@@ -173,6 +174,15 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
     let progress: &dyn Fn(&pixelactions_core::report::StepReport) =
         if json { run::silent() } else { &live };
 
+    // The flow decides whether this run is recorded; the closure is built
+    // once so `execute` never has to know which it got.
+    let record = |event: &pixelactions_core::audit::Event| audit::append(event);
+    let auditor: &dyn Fn(&pixelactions_core::audit::Event) = if flow.settings.audit {
+        &record
+    } else {
+        run::no_audit()
+    };
+
     let mut injector = make_injector(&session.monitors)?;
     let report = run::execute(
         injector.as_mut(),
@@ -187,6 +197,7 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
             progress,
             waiter: run::real_waiter(),
             differ: run::real_differ(),
+            auditor: &auditor,
         },
         &mut verifier,
     );

@@ -192,6 +192,15 @@ impl Server<'_> {
             }
         };
 
+        // A protocol session logs per request, under the same settings the
+        // client agreed to in `hello` — one run in the record per step it
+        // asked for, which is what a serve session actually is.
+        let record = |event: &pixelactions_core::audit::Event| crate::audit::append(event);
+        let auditor: &dyn Fn(&pixelactions_core::audit::Event) = if flow.settings.audit {
+            &record
+        } else {
+            run::no_audit()
+        };
         let mut verifier = |session: &Path, label: Option<&str>| verify::find(session, label);
         let report = run::execute(
             self.injector,
@@ -210,6 +219,7 @@ impl Server<'_> {
                 progress: run::silent(),
                 waiter: run::real_waiter(),
                 differ: run::real_differ(),
+                auditor: &auditor,
             },
             &mut verifier,
         );

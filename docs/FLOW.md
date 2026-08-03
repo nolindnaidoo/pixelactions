@@ -15,6 +15,7 @@ timeout_ms = 10000   # how long a wait_* step may poll
 poll_ms = 400        # gap between polls; each poll is a screen capture
 failsafe = true      # stop if the cursor is slammed into a screen corner
 failsafe_margin = 10 # how close to a corner counts
+audit = true         # append what this run did to the audit log (default)
 
 [[step]]
 action = "click"
@@ -178,6 +179,36 @@ and a flow file has none by design. That is a job for
   `failsafe = false` for a Wayland machine is running unguarded on the
   other three. Leave the setting where it belongs: in the flow that needs
   it.
+
+- **`audit`** (default `true`) — append one NDJSON line per event to
+  `$XDG_STATE_HOME/pixelactions/audit.ndjson`, falling back to
+  `~/.local/state/pixelactions/audit.ndjson`.
+
+  The log answers *what did that run actually do* for the runs where
+  nobody was watching — one at 3am, or one a model drove. It is written
+  **as the run goes**, not at the end, so a run the watchdog stopped or
+  someone killed still leaves a record of what it did before it stopped.
+
+  Each step line carries the summary, the outcome, the elapsed time, and
+  **the coordinates that were actually sent** — after space conversion,
+  which is the number that matters when a click landed somewhere
+  surprising. The saved coordinate is already in the session; this is the
+  one the OS received.
+
+  **It never contains typed text.** Not because anything strips it, but
+  because a `type` step's text never reaches the record in the first
+  place: steps are logged by their summary, and a `type` summary is
+  `type 26 chars`. That is the difference between a rule someone has to
+  remember and one the types enforce.
+
+  One file, appended to, **never pruned**. A run costs about a kilobyte,
+  so a thousand runs is a megabyte — deleting your own record of what
+  your machine did, to save that, is not a trade this tool makes. Delete
+  the file yourself whenever you like.
+
+  Set `audit = false` to write nothing. A log that cannot be written —
+  no writable state directory, a full disk — never fails the run; the
+  run is the point and the record is not worth dying for.
 
 ## Paths
 

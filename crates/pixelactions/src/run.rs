@@ -24,6 +24,8 @@ use pixelactions_core::plan::Plan;
 use pixelactions_core::report::{RunReport, StepOutcome, StepReport};
 use pixelcoords_core::session::MonitorRecord;
 
+use pixelactions_core::audit::Event as AuditEvent;
+
 use crate::inject::{Button, Injector};
 use crate::verify;
 
@@ -394,6 +396,20 @@ pub struct Context<'a> {
     /// Compares a region against the screen now — the RGB comparison the
     /// correlation-based seams above cannot make.
     pub differ: &'a Differ<'a>,
+    /// Receives every event this run produces, as it happens.
+    ///
+    /// Incremental on purpose: writing at the end would lose exactly the
+    /// runs worth having a record of — the one the watchdog stopped, the
+    /// one someone killed.
+    pub auditor: &'a Auditor<'a>,
+}
+
+/// Receives run events. See `pixelactions_core::audit`.
+pub type Auditor<'a> = dyn Fn(&AuditEvent) + 'a;
+
+/// An auditor that records nothing, for callers that do not want a log.
+pub fn no_audit() -> &'static Auditor<'static> {
+    &|_: &AuditEvent| {}
 }
 
 /// Compares `label` against the screen, allowing `tolerance` percent of
@@ -438,7 +454,21 @@ pub fn execute(
         progress,
         waiter,
         differ,
+        auditor,
     } = *context;
+    auditor(&AuditEvent::run(
+        crate::audit::now(),
+        session.display().to_string(),
+        true,
+    ));
+    // One place every finished step passes through, so a step added later
+    // cannot quietly skip the log the way it could if each site called
+    // `progress` and `push` on its own.
+    let emit = |report: StepReport| -> StepReport {
+        progress(&report);
+        auditor(&AuditEvent::step(crate::audit::now(), &report));
+        report
+    };
     let started = Instant::now();
     let settle = Duration::from_millis(flow.settings.settle_ms);
     let mut steps: Vec<StepReport> = Vec::with_capacity(plan.steps.len());
@@ -453,8 +483,7 @@ pub fn execute(
     for planned in &plan.steps {
         if failed {
             let skipped = record(planned, StepOutcome::Skipped, None, 0);
-            progress(&skipped);
-            steps.push(skipped);
+            steps.push(emit(skipped));
             continue;
         }
         if started.elapsed() > WATCHDOG {
@@ -464,8 +493,7 @@ pub fn execute(
                 Some("watchdog: the run exceeded its time budget".into()),
                 0,
             );
-            progress(&timed_out);
-            steps.push(timed_out);
+            steps.push(emit(timed_out));
             failed = true;
             continue;
         }
@@ -488,8 +516,7 @@ pub fn execute(
                 step_started.elapsed().as_millis() as u64,
                 corrected_points(planned, &corrections),
             );
-            progress(&refused);
-            steps.push(refused);
+            steps.push(emit(refused));
             failed = true;
             continue;
         }
@@ -515,8 +542,7 @@ pub fn execute(
                 )
             }
         };
-        progress(&done);
-        steps.push(done);
+        steps.push(emit(done));
     }
 
     RunReport {
@@ -882,6 +908,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -921,6 +948,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -969,6 +997,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1035,6 +1064,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1072,6 +1102,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1104,6 +1135,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1145,6 +1177,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut once,
         );
@@ -1183,6 +1216,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1215,6 +1249,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1268,6 +1303,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut never_found(),
         );
@@ -1308,6 +1344,7 @@ mod tests {
                     progress: silent(),
                     waiter: waits_ok(),
                     differ: sees_no_change(),
+                    auditor: no_audit(),
                 },
                 &mut always_found(),
             );
@@ -1351,6 +1388,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut once,
         );
@@ -1407,6 +1445,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut drifting,
         );
@@ -1442,6 +1481,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut never_found(),
         );
@@ -1519,6 +1559,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut moved_up(),
         );
@@ -1617,6 +1658,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut appears_after(3),
         );
@@ -1651,6 +1693,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_out(0.42),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut never_found(),
         );
@@ -1696,6 +1739,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut ambiguous,
         );
@@ -1730,6 +1774,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_out(0.10),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut never_found(),
         );
@@ -1774,6 +1819,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_out(0.05),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             // `wait` never matched, but a full-frame look finds it 120 px up.
             &mut moved_up(),
@@ -1789,6 +1835,115 @@ mod tests {
             detail.contains("(0, -120)"),
             "names the drift so it can be fixed: {detail}"
         );
+    }
+
+    /// The record is written **as the run goes**, not at the end — so a
+    /// run the watchdog stops, or one someone kills, still leaves one.
+    #[test]
+    fn every_step_is_recorded_as_it_finishes() {
+        use std::cell::RefCell;
+        let seen: RefCell<Vec<String>> = RefCell::new(Vec::new());
+        let record = |event: &AuditEvent| seen.borrow_mut().push(event.line());
+
+        let flow = flow_with(Verify::None);
+        let plan = Plan {
+            steps: vec![
+                planned(
+                    0,
+                    Step::Click {
+                        target: "submit".into(),
+                    },
+                    vec![point(430.0, 220.0)],
+                ),
+                planned(
+                    1,
+                    Step::Key {
+                        chord: "esc".into(),
+                    },
+                    vec![],
+                ),
+            ],
+        };
+        execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: true,
+                progress: silent(),
+                waiter: waits_ok(),
+                differ: sees_no_change(),
+                auditor: &record,
+            },
+            &mut always_found(),
+        );
+
+        let lines = seen.borrow();
+        assert_eq!(lines.len(), 3, "one run line and two steps: {lines:?}");
+        assert!(lines[0].contains(r#""event":"run""#), "{}", lines[0]);
+        assert!(lines[0].contains("/tmp/session"), "{}", lines[0]);
+        assert!(lines[1].contains("click submit"), "{}", lines[1]);
+        // The coordinate actually sent, not the one the session saved.
+        assert!(lines[1].contains("430"), "{}", lines[1]);
+        assert!(lines[2].contains("key esc"), "{}", lines[2]);
+    }
+
+    /// A run stopped part-way still leaves a record of what it did before
+    /// stopping — the case the log exists for.
+    #[test]
+    fn a_failed_run_records_the_failure_and_the_skips() {
+        use std::cell::RefCell;
+        let seen: RefCell<Vec<String>> = RefCell::new(Vec::new());
+        let record = |event: &AuditEvent| seen.borrow_mut().push(event.line());
+
+        let flow = waiting_flow(
+            "[[step]]\naction = \"changed\"\ntarget = \"panel\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![
+                planned(
+                    0,
+                    Step::Changed {
+                        target: "panel".into(),
+                        tolerance: 0.0,
+                    },
+                    vec![point(1.0, 1.0)],
+                ),
+                planned(
+                    1,
+                    Step::Click {
+                        target: "submit".into(),
+                    },
+                    vec![point(430.0, 220.0)],
+                ),
+            ],
+        };
+        execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: true,
+                progress: silent(),
+                waiter: waits_ok(),
+                differ: sees_no_change(),
+                auditor: &record,
+            },
+            &mut always_found(),
+        );
+
+        let lines = seen.borrow();
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines[1].contains(r#""outcome":"failed""#), "{}", lines[1]);
+        assert!(lines[1].contains("did not change"), "{}", lines[1]);
+        assert!(lines[2].contains(r#""outcome":"skipped""#), "{}", lines[2]);
     }
 
     #[test]
@@ -1819,6 +1974,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1855,6 +2011,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1898,6 +2055,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -1931,6 +2089,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut never_found(),
         );
@@ -1970,6 +2129,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
@@ -2019,6 +2179,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut never_found(),
         );
@@ -2049,6 +2210,7 @@ mod tests {
                 progress: silent(),
                 waiter: waits_ok(),
                 differ: sees_no_change(),
+                auditor: no_audit(),
             },
             &mut always_found(),
         );
