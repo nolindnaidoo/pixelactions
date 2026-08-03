@@ -38,6 +38,11 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 enigo = "0.6"
+# Wall-clock timestamps for the audit log. An audit record without a time
+# is not an audit record, and the only alternative is hand-rolling
+# civil-date arithmetic, which is a worse trade than one well-maintained
+# crate. Same crate the sister tool carries, for the same job.
+time = { version = "0.3", features = ["formatting"] }
 
 # Wayland input is a negotiation with the compositor, not a library call,
 # so the Linux platform layer owns the protocols directly. Each of these

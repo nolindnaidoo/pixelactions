@@ -216,6 +216,13 @@ pub struct Settings {
     pub failsafe: bool,
     /// How close to a corner counts, in the input space's own units.
     pub failsafe_margin: f64,
+    /// Append what this run did to the audit log.
+    ///
+    /// On by default. Opt-in would defeat the purpose — the first
+    /// unattended run is exactly the one that would have no record. The
+    /// file is local, append-only, and never contains typed text; see
+    /// [`crate::audit`].
+    pub audit: bool,
 }
 
 impl Default for Settings {
@@ -229,6 +236,7 @@ impl Default for Settings {
             poll_ms: 400,
             failsafe: true,
             failsafe_margin: 10.0,
+            audit: true,
         }
     }
 }

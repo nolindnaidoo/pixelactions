@@ -8,6 +8,44 @@ CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 
 ## Unreleased — 0.6.0
 
+### The audit log
+
+A run now leaves a record. `design/07` put this under "safety and
+orchestration" and said why: it is the difference between a convenience
+and something you would let run unattended.
+
+```
+{"event":"run","utc":"2026-08-03T21:52:46.115504Z","session":"…/a","executed":true}
+{"event":"step","utc":"…","index":0,"summary":"type 26 chars","outcome":"executed","points":[],"elapsed_ms":154}
+{"event":"step","utc":"…","index":1,"summary":"changed term","outcome":"verified","points":[{"x":1000.0,"y":738.0,…}],"elapsed_ms":226}
+```
+
+NDJSON at `$XDG_STATE_HOME/pixelactions/audit.ndjson` (falling back to
+`~/.local/state`), on by default, `audit = false` in `[settings]` to turn
+it off.
+
+**Written as the run goes**, not at the end, so a run the watchdog
+stopped or someone killed still leaves a record of what it did first —
+which is the case the log exists for.
+
+Each step carries **the coordinates actually sent**, after space
+conversion. The saved coordinate is already in the session; this is the
+one the OS received, and the only one worth having when a click landed
+somewhere surprising.
+
+**It never contains typed text**, and not because anything strips it: a
+`type` step's text never reaches the record, because steps are logged by
+their summary and that summary is `type 26 chars`. A rule the types
+enforce rather than one someone has to remember.
+
+One file, never pruned — a run costs about a kilobyte. A log that cannot
+be written never fails the run.
+
+New dependency: `time` (0.3, `formatting`), the same crate the sister tool
+carries for the same job. An audit record without a wall-clock time is not
+an audit record, and the alternative was hand-rolling civil-date
+arithmetic.
+
 ### `changed` — proving an action did something
 
 `verify` confirms a region still matches what you marked. Nothing
