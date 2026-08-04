@@ -196,6 +196,12 @@ instead of the two we could afford to embed.
   and the run halts before the next step — the one control that works
   while the automation holds your keyboard and the terminal is not
   focused.
+- **Every run leaves a record.** One NDJSON line per event, written as
+  the run goes rather than at the end, so a run the watchdog stopped or
+  someone killed still says what it did first. It carries the coordinates
+  actually sent — not the ones the session saved — and it never contains
+  typed text, because steps are recorded by their summary and a `type`
+  summary is `type 26 chars`. `doctor` prints where it lives.
 - **Exit codes are the API**: 0 done, 1 a step failed, 2 malformed
   question, 3 refused.
 
@@ -262,6 +268,20 @@ rather than assumed — but on a single-display machine, so **multi-monitor
 and mixed-DPI layouts have not been run on real hardware yet**, only
 unit-tested. Reports from a two-screen desk are the most useful thing
 anyone could send.
+
+**Those runs were 0.2.0 through 0.4.0.** Five releases have shipped since
+— the pixelcoords seam, `changed`, the audit log, the MCP surface, and a
+round of bug fixes — and on Windows, X11 and Wayland none of them have
+been driven by hand. macOS has. They pass CI on all four platforms and
+have headless tests, which is not the same thing, and this file will say
+so until someone sits at each machine.
+
+One slice of that is now automatic: `scripts/x11-scenarios.sh` runs in CI
+against a live X server, and checks that a marked region is located, that
+a click lands where `plan` said, that a cursor in a corner refuses the
+step, and that the audit log records a refused run. That is a real X
+server and a real synthetic event — on a bare 1280×1024 Xvfb with no
+window manager, which is not a desktop.
 
 Binaries ship for the platforms that are actually supported — all four
 now. Shipping one for a platform that refuses to inject would imply

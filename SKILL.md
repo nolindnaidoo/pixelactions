@@ -128,8 +128,19 @@ run `pixelactions serve --session DIR` and speak the line protocol: one
 JSON object per line on stdin, one back on stdout. Same verbs.
 See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
-There is no MCP server, deliberately. Every agent with a shell can run
-this CLI; a local stdio MCP server is reachable by fewer of them.
+There is also an MCP server: `pixelactions mcp`. It serves three tools —
+`pixelactions_plan` resolves steps and touches nothing,
+`pixelactions_find` re-locates a region that moved, and
+`pixelactions_act` performs them.
+
+**Acting is off unless a human launched it with `--yes`**, which is a
+command-line flag you cannot pass. If `pixelactions_act` refuses, say so
+and ask the operator to relaunch the server; do not retry it, and do not
+look for a way around the gate.
+
+Read `ok` in the result, never `isError`. A failed step, a region that
+could not be found, and a refused act all come back as ordinary results
+with `ok: false`. Only a malformed question is a protocol error.
 
 ## Safety
 

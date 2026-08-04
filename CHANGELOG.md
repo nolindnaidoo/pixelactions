@@ -8,64 +8,28 @@ CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 
 ## 0.9.0 — 2026-08-04
 
-Bug fixes, all of them — but one changes what a flow file is allowed to
-say, and that is what makes this a minor rather than a patch. Everything
-else here is a correction to behaviour that was wrong.
+**Six bug fixes, no new features.** Four were found by auditing the code
+that 0.5.0–0.8.0 added; two more by a second sweep of everything those
+releases had not touched. Three of them made the tool *say the wrong
+thing confidently*, which is the failure this project is built to avoid.
 
-### Windows refuses to act when it is not DPI-aware
+It is a minor rather than a patch for one reason: **a flow file that
+parsed before can now be refused.** Everything else is a correction to
+behaviour that was wrong.
 
-`main` declares per-monitor-v2 awareness at startup best-effort and
-discards the result. `doctor` asked what actually held; **the acting path
-never did**. An external compatibility override can force a different
-mode, and then Windows rescales every coordinate against the primary
-monitor — so a click lands somewhere other than the region a human marked,
-on any display not at 100%, and nothing says so.
+### Upgrading
 
-A tool that refuses an ambiguous region, a moved region, and a pixelcoords
-that is too old should refuse this too. It now does, on `run` and on the
-MCP acting path both. `plan` and `doctor` still work: they report, they do
-not inject.
+One thing can stop an existing flow from running. If your `[settings]`
+has `poll_ms` greater than `timeout_ms`, it is now refused at parse time
+— shorten `poll_ms` or lengthen `timeout_ms`. It was never doing what it
+looked like: that combination got one look at the screen and then timed
+out. Details below.
 
-### Two statements that did nothing
+Two more change behaviour without breaking a file: `changed` now refuses
+a region that moved rather than reporting it changed, and on Windows a
+run refuses outright if the process is not DPI-aware.
 
-`mcp::preflight` ended with `let _ = audit::log_path();` and
-`let _ = run::no_audit();`. They existed only to silence unused imports
-and shipped that way in 0.8.0. Gone, along with the imports.
-
-### Breaking: a flow whose poll interval exceeds its timeout is refused
-
-See below. A `[settings]` block with `poll_ms` greater than `timeout_ms`
-parsed before and ran badly — one poll, then a timeout. It is now refused
-at parse time. If you have such a flow, shorten `poll_ms` or lengthen
-`timeout_ms`; it was never doing what it looked like it was doing.
-
-
-### `changed` no longer reports a region that merely moved
-
-`pixelcoords diff` compares at the position the session recorded. A region
-that **moved** therefore differs for the wrong reason — the pixels there
-belong to whatever took its place — and `changed` reported success.
-
-That is a false pass on the one assertion whose whole job is catching a
-no-op. A UI that reflowed made *did my click do something* answer **yes**
-about an element nothing had touched.
-
-When something differs, it now spends one re-location to tell the two
-apart, and refuses rather than claiming a change it cannot stand behind:
-
-```
-region "panel" moved by (0, -120) physical px, so the pixels that differ are
-whatever took its place — whether it actually changed is unknown. Re-mark
-the session, or assert on a region that stays put
-```
-
-**An unchanged region pays nothing extra.** The full-frame search happens
-only when `diff` already said something differs — the same trade a `wait`
-timeout makes, spending the expensive look only when the cheap answer is
-ambiguous.
-
-
-### A contradictory poll config is refused in the flow file's own words
+### Breaking: a contradictory poll config is refused in the flow file's own words
 
 ```toml
 timeout_ms = 500
@@ -95,6 +59,30 @@ them too, and a rule enforced on one path is a rule with a hole in it.
 
 This was a regression from 0.6.0: before the polling loop moved into
 `pixelcoords wait`, the same flow did one poll and timed out normally.
+
+### `changed` no longer reports a region that merely moved
+
+`pixelcoords diff` compares at the position the session recorded. A region
+that **moved** therefore differs for the wrong reason — the pixels there
+belong to whatever took its place — and `changed` reported success.
+
+That is a false pass on the one assertion whose whole job is catching a
+no-op. A UI that reflowed made *did my click do something* answer **yes**
+about an element nothing had touched.
+
+When something differs, it now spends one re-location to tell the two
+apart, and refuses rather than claiming a change it cannot stand behind:
+
+```
+region "panel" moved by (0, -120) physical px, so the pixels that differ are
+whatever took its place — whether it actually changed is unknown. Re-mark
+the session, or assert on a region that stays put
+```
+
+**An unchanged region pays nothing extra.** The full-frame search happens
+only when `diff` already said something differs — the same trade a `wait`
+timeout makes, spending the expensive look only when the cheap answer is
+ambiguous.
 
 
 ### The audit log writes on Windows
@@ -144,6 +132,27 @@ The rule now lives on `FindReport` beside `is_confirmed`, as
 `pixelcoords_core::locate::all_relocated`, which had it right. The summary
 also names the ambiguity, since a bare count reads like a plain miss and
 gives a model no idea the crop is the problem rather than the screen.
+
+### Windows refuses to act when it is not DPI-aware
+
+`main` declares per-monitor-v2 awareness at startup best-effort and
+discards the result. `doctor` asked what actually held; **the acting path
+never did**. An external compatibility override can force a different
+mode, and Windows then rescales every coordinate against the primary
+monitor — so a click lands somewhere other than the region a human marked,
+on any display not at 100%, and nothing says so.
+
+A tool that refuses an ambiguous region, a moved region, and a pixelcoords
+that is too old should refuse this too. It now does, on `run` and on the
+MCP acting path both. `plan` and `doctor` still work: they report, they do
+not inject.
+
+### Two statements that did nothing
+
+`mcp::preflight` ended with `let _ = audit::log_path();` and
+`let _ = run::no_audit();`. They existed only to silence unused imports,
+and shipped that way in 0.8.0. Gone, along with the imports.
+
 
 ## 0.8.0 — 2026-08-04
 
