@@ -68,6 +68,31 @@ impl FindReport {
             .is_some_and(|r| r.found && !r.ambiguous)
     }
 
+    /// Every region was found **and unambiguous** — the aggregate that
+    /// mirrors what the acting path will actually do.
+    ///
+    /// An empty result set is not success: `find` was asked about regions
+    /// and answered about none. Same rule as the sister crate's
+    /// `locate::all_relocated`, and stated here so a consumer cannot
+    /// hand-roll a weaker one.
+    #[must_use]
+    pub fn all_confirmed(&self) -> bool {
+        !self.results.is_empty() && self.results.iter().all(|r| r.found && !r.ambiguous)
+    }
+
+    /// How many regions are trustworthy, and how many matched in more
+    /// than one place.
+    #[must_use]
+    pub fn tally(&self) -> (usize, usize) {
+        let confirmed = self
+            .results
+            .iter()
+            .filter(|r| r.found && !r.ambiguous)
+            .count();
+        let ambiguous = self.results.iter().filter(|r| r.ambiguous).count();
+        (confirmed, ambiguous)
+    }
+
     /// The region's current monitor-local click point, when it was found
     /// unambiguously and reported with geometry.
     ///
@@ -277,6 +302,46 @@ fn millis(duration: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parsed(json: &str) -> FindReport {
+        serde_json::from_str(json).expect("fixture")
+    }
+
+    /// The rule the acting path enforces: a crop matching in three places
+    /// yields no point worth acting on, so it is not "located".
+    #[test]
+    fn an_ambiguous_region_is_not_confirmed() {
+        let r = parsed(r#"{"results":[{"label":"a","found":true,"ambiguous":true,"score":0.99}]}"#);
+        assert!(!r.all_confirmed(), "ambiguous must not count as located");
+        assert_eq!(r.tally(), (0, 1));
+        assert!(!r.is_confirmed("a"), "consistent with is_confirmed");
+    }
+
+    #[test]
+    fn every_region_found_and_unambiguous_is_confirmed() {
+        let r = parsed(
+            r#"{"results":[{"label":"a","found":true,"ambiguous":false,"score":0.99},
+                           {"label":"b","found":true,"ambiguous":false,"score":0.98}]}"#,
+        );
+        assert!(r.all_confirmed());
+        assert_eq!(r.tally(), (2, 0));
+    }
+
+    /// Asked about regions, answered about none — not success.
+    #[test]
+    fn an_empty_report_is_not_confirmed() {
+        assert!(!parsed(r#"{"results":[]}"#).all_confirmed());
+    }
+
+    #[test]
+    fn one_bad_region_sinks_the_aggregate() {
+        let r = parsed(
+            r#"{"results":[{"label":"a","found":true,"ambiguous":false,"score":0.99},
+                           {"label":"b","found":false,"ambiguous":false,"score":0.10}]}"#,
+        );
+        assert!(!r.all_confirmed());
+        assert_eq!(r.tally(), (1, 0));
+    }
 
     const REPORT: &str = r#"{
       "schema": 1,

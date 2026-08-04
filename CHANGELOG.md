@@ -6,6 +6,28 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## Unreleased — 0.8.1
+
+### `pixelactions_find` no longer calls an ambiguous match located
+
+Over MCP it counted regions that were *found*, ignoring whether the crop
+matched in more than one place. Everywhere else in this tool a region is
+only trustworthy when it is found **and** unambiguous — that is what
+`is_confirmed` means, and the acting path stops a run on anything failing
+it, because a crop matching in three places yields no point worth acting
+on.
+
+So a model asked where a region was, got `ok: true`, called
+`pixelactions_act`, and was refused — a green light and a refusal from the
+same tool about the same region. That is precisely the contradiction the
+read-`ok` contract exists to prevent.
+
+The rule now lives on `FindReport` beside `is_confirmed`, as
+`all_confirmed`, so a consumer cannot hand-roll a weaker one. It matches
+`pixelcoords_core::locate::all_relocated`, which had it right. The summary
+also names the ambiguity, since a bare count reads like a plain miss and
+gives a model no idea the crop is the problem rather than the screen.
+
 ## 0.8.0 — 2026-08-04
 
 ### `pixelactions mcp` — the executor, reachable by a model
