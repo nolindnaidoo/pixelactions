@@ -26,7 +26,7 @@ command -v xdotool >/dev/null || { echo "xdotool is needed to read the pointer b
 command -v convert >/dev/null || { echo "ImageMagick is needed to cut a crop" >&2; exit 2; }
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+trap 'rm -rf "$work"; [ -n "${xmessage_pid:-}" ] && kill "$xmessage_pid" 2>/dev/null; true' EXIT
 
 export XDG_SESSION_TYPE=x11
 export XDG_STATE_HOME="$work/state"
@@ -44,46 +44,46 @@ check() { # check <name> <expected> <actual>
 }
 
 echo "== putting something detailed on screen"
-# Random noise, painted onto the root window. Two properties the matcher
-# needs and text does not have:
+# The matcher needs two things a naive backdrop does not give it, and
+# pixelcoords refuses each by name when it is missing:
 #
-#   - **Detailed.** A flat crop correlates with everything; pixelcoords
-#     refuses one by name rather than matching it anywhere.
-#   - **Unique.** Text repeats — the same word at two places makes a crop
-#     match in more than one, and pixelcoords refuses that too, correctly,
-#     because an ambiguous match yields no point worth acting on.
+#   - **Detail.** A flat crop "matches anywhere rather than somewhere".
+#   - **Uniqueness.** Ordinary prose repeats, so a crop of it "matched in
+#     more than one place" — and an ambiguous match yields no point worth
+#     acting on.
 #
-# Both refusals are the tool behaving properly. A scenario has to give it
-# something a human would actually mark.
-convert -size 1280x1024 xc: +noise Random "$work/noise.png" 2>&1 \
-  || { echo "  FAIL  could not generate the noise image" >&2; exit 1; }
-[ -s "$work/noise.png" ] || { echo "  FAIL  noise image is empty" >&2; exit 1; }
-
-# `display -window root` paints the root pixmap and exits. Where it is
-# unavailable — ImageMagick ships it separately on some images — fall back
-# to xsetroot with the image as a tile. Whichever works, the check below
-# is on the capture, not on the painting.
-painted=no
-if command -v display >/dev/null; then
-  display -window root "$work/noise.png" >/dev/null 2>&1 && painted=display
-fi
-if [ "$painted" = no ] && command -v xsetroot >/dev/null; then
-  xsetroot -bitmap "$work/noise.png" >/dev/null 2>&1 && painted=xsetroot
-fi
-echo "  painted via: $painted"
-sleep 1
+# Both refusals are the tool being right. Random hex is dense and never
+# repeats, which is what a region a human would mark actually looks like.
+# Drawn with xmessage because it needs no window manager and no image
+# viewer, both of which proved unreliable on a bare runner.
+lines=""
+for _ in $(seq 1 14); do
+  lines="$lines$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+"
+done
+xmessage -geometry 900x600+40+40 "$lines" &
+xmessage_pid=$!
+sleep 2
 
 echo "== capturing it the way pixelcoords would"
 pixelcoords shoot --out "$work" >/dev/null 2>&1
 shot="$work/screenshot-0.png"
-[ -f "$shot" ] || { echo "  FAIL  no capture written"; exit 1; }
+[ -f "$shot" ] || { echo "  FAIL  no capture written" >&2; exit 1; }
 
-X=400; Y=300; W=240; H=90
-dev=$(convert "$shot" -crop "${W}x${H}+${X}+${Y}" +repage \
-  -format "%[fx:standard_deviation]" info: 2>/dev/null || echo 0)
-dev_i=$(printf '%.0f' "$(echo "$dev * 100000" | bc -l 2>/dev/null || echo 0)")
-echo "  region ${X},${Y} deviation ${dev_i}"
-[ "${dev_i:-0}" -gt 100 ] || {
+# Land on text rather than padding: where the glyphs fall depends on the
+# fonts the runner happens to have, which is not something to hard-code.
+W=200; H=60
+best=-1; X=0; Y=0
+for cy in 70 130 190 250 310 370; do
+  for cx in 70 170 270 370 470; do
+    dev=$(convert "$shot" -crop "${W}x${H}+${cx}+${cy}" +repage \
+      -format "%[fx:standard_deviation]" info: 2>/dev/null || echo 0)
+    dev_i=$(printf '%.0f' "$(echo "$dev * 100000" | bc -l 2>/dev/null || echo 0)")
+    if [ "${dev_i:-0}" -gt "$best" ]; then best=$dev_i; X=$cx; Y=$cy; fi
+  done
+done
+echo "  most detailed tile at ${X},${Y} (deviation ${best})"
+[ "$best" -gt 100 ] || {
   echo "  FAIL  the capture is flat — nothing to mark, so no scenario is meaningful" >&2
   exit 1
 }
