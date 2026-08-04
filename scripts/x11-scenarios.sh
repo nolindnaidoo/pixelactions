@@ -153,8 +153,18 @@ log="$XDG_STATE_HOME/pixelactions/audit.ndjson"
 [ -f "$log" ] && recorded=yes || recorded=no
 check "a record was written" "yes" "$recorded"
 if [ -f "$log" ]; then
-  steps=$(grep -c '"event":"step"' "$log" || true)
-  check "the record has a step line" "1" "$steps"
+  # Two runs happened: the click and the corner refusal. Both must be in
+  # there — a log that only records the runs that went well is not an
+  # audit log, and the refused one is the case it exists for.
+  runs=$(grep -c '"event":"run"' "$log" || true)
+  check "both runs were recorded" "2" "$runs"
+  refused=$(grep -c '"outcome":"refused"' "$log" || true)
+  check "the refused step is in the record" "1" "$refused"
+  # A `type` step never reaches the log as text, but assert the weaker
+  # thing that is true here: nothing in the record is a raw session path
+  # masquerading as content.
+  leaked=$(grep -c 'hunter2\|password' "$log" || true)
+  check "nothing that looks like a secret is in the record" "0" "$leaked"
 fi
 
 echo "== scenario: exit codes are the API"
