@@ -445,10 +445,28 @@ fn tool_find(object: &Map<String, Value>) -> Result<Value, String> {
     let session = session_of(object)?;
     let label = object.get("label").and_then(Value::as_str);
     let report = verify::find(&session, label).map_err(|e| format!("{e:#}"))?;
-    let found = report.results.iter().filter(|r| r.found).count();
-    let summary = format!("{found}/{} region(s) located", report.results.len());
+    // Found **and unambiguous** — the rule `is_confirmed` states and the
+    // acting path enforces. Counting `found` alone would tell a model a
+    // region matching in three places is located, and then refuse the act
+    // call that followed, which is the contradiction `ok` exists to
+    // prevent.
+    let (confirmed, ambiguous) = report.tally();
+    // When a region is ambiguous, say why: the bare count reads like a
+    // plain miss, and a model would have no idea the crop is the problem
+    // rather than the screen.
+    let note = if ambiguous > 0 {
+        format!(
+            " ({ambiguous} matched in more than one place, so there is no point worth acting on)"
+        )
+    } else {
+        String::new()
+    };
+    let summary = format!(
+        "{confirmed}/{} region(s) located{note}",
+        report.results.len()
+    );
     let structured = json!({
-        "ok": found == report.results.len() && !report.results.is_empty(),
+        "ok": report.all_confirmed(),
         "results": report.results.iter().map(|r| json!({
             "label": r.label,
             "found": r.found,
