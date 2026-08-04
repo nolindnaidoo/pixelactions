@@ -677,7 +677,9 @@ fn confirm(
     verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
     match step {
-        Step::Changed { target, tolerance } => check_changed(session, target, *tolerance, differ),
+        Step::Changed { target, tolerance } => {
+            check_changed(session, target, *tolerance, differ, verifier)
+        }
         Step::WaitFor { target } => poll_until(flow, session, target, true, waiter, verifier),
         Step::WaitGone { target } => poll_until(flow, session, target, false, waiter, verifier),
         Step::Verify { target } => check_once(session, target, verifier),
@@ -688,37 +690,78 @@ fn confirm(
 /// A `changed` step: prove the region is no longer what it was.
 ///
 /// `pixelcoords diff` answers the opposite question — `ok` means every
-/// region stayed *within* tolerance — so this succeeds precisely when that
-/// is false. A step that finds nothing changed fails the run, the same way
-/// a `verify` that finds the region gone does: both are assertions about
-/// the screen, and an assertion that quietly passes is worse than none.
+/// region stayed *within* tolerance — so this succeeds precisely when
+/// that is false. A step that finds nothing changed fails the run, the
+/// same way a `verify` that finds the region gone does: both are
+/// assertions about the screen, and an assertion that quietly passes is
+/// worse than none.
+///
+/// **`diff` compares at the position the session recorded**, which means
+/// a region that *moved* differs for the wrong reason and would report a
+/// change that never happened. That is a false pass on the one assertion
+/// whose whole job is catching a no-op, so it costs one full-frame
+/// `find` to rule out — but only when `diff` already said something
+/// differs. An unchanged region is the common failure and pays nothing
+/// extra; the expensive search buys a distinction only when there is one
+/// to make. Same trade `poll_until` makes on timeout.
 fn check_changed(
     session: &Path,
     target: &str,
     tolerance: f64,
     differ: &Differ<'_>,
+    verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
 ) -> Result<StepOutcome> {
     let report = differ(session, target, tolerance)?;
-    if !report.ok {
-        return Ok(StepOutcome::Verified);
+    if report.ok {
+        let detail = report.first().map_or_else(
+            || format!("region {target:?} was not in the report"),
+            |r| {
+                format!(
+                    "{} of {} pixels differ ({:.3}%)",
+                    r.changed_px, r.masked_px, r.changed_pct
+                )
+            },
+        );
+        bail!(
+            "region {target:?} did not change{} — {detail}",
+            if tolerance > 0.0 {
+                format!(" by more than {tolerance}%")
+            } else {
+                String::new()
+            }
+        );
     }
-    let detail = report.first().map_or_else(
-        || format!("region {target:?} was not in the report"),
-        |r| {
-            format!(
-                "{} of {} pixels differ ({:.3}%)",
-                r.changed_px, r.masked_px, r.changed_pct
-            )
-        },
-    );
-    bail!(
-        "region {target:?} did not change{} — {detail}",
-        if tolerance > 0.0 {
-            format!(" by more than {tolerance}%")
-        } else {
-            String::new()
-        }
-    )
+
+    // Something differs where the region used to be. Was that the region
+    // changing, or the region leaving?
+    if let Some((dx, dy)) = displaced(session, target, verifier) {
+        bail!(
+            "region {target:?} moved by ({dx}, {dy}) physical px, so the pixels that \
+             differ are whatever took its place — whether it actually changed is \
+             unknown. Re-mark the session, or assert on a region that stays put"
+        );
+    }
+    Ok(StepOutcome::Verified)
+}
+
+/// How far a region moved, when it moved and can be trusted.
+///
+/// `None` covers three cases that all mean "do not claim it moved": it is
+/// where it was, it could not be found at all, or the look itself failed.
+/// A broken verifier must not turn a real answer into an error — the
+/// `diff` already ran, and its result stands.
+fn displaced(
+    session: &Path,
+    target: &str,
+    verifier: &mut dyn FnMut(&Path, Option<&str>) -> Result<verify::FindReport>,
+) -> Option<(i32, i32)> {
+    let report = verifier(session, Some(target)).ok()?;
+    let result = report.result_for(target)?;
+    if !result.found || result.ambiguous {
+        return None;
+    }
+    let delta = result.delta?;
+    (delta.dx != 0 || delta.dy != 0).then_some((delta.dx, delta.dy))
 }
 
 /// A `verify` step: look once, and say what was seen when it is not there.
@@ -2022,6 +2065,91 @@ mod tests {
             detail.contains("0 of 7503 pixels"),
             "quantifies it rather than only refusing: {detail}"
         );
+    }
+
+    /// The false pass this verb had: `diff` compares at the position the
+    /// session recorded, so a region that *moved* differs for the wrong
+    /// reason and used to report success. A region that merely moved has
+    /// not been shown to change.
+    #[test]
+    fn a_region_that_moved_is_not_reported_as_changed() {
+        let flow = waiting_flow(
+            "[[step]]\naction = \"changed\"\ntarget = \"submit\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Changed {
+                    target: "submit".into(),
+                    tolerance: 0.0,
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: false,
+                progress: silent(),
+                waiter: waits_ok(),
+                // Pixels differ where the region used to be ...
+                differ: sees_change(),
+                // ... because the region is 120px up, intact.
+                auditor: no_audit(),
+            },
+            &mut moved_up(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Failed);
+        let detail = report.steps[0].detail.clone().expect("explained");
+        assert!(detail.contains("moved by (0, -120)"), "{detail}");
+        assert!(
+            detail.contains("whether it actually changed is unknown"),
+            "does not claim to know: {detail}"
+        );
+    }
+
+    /// A region that stayed put and genuinely differs still passes — the
+    /// extra `find` must not cost the verb its purpose.
+    #[test]
+    fn a_region_that_stayed_put_and_differs_still_passes() {
+        let flow = waiting_flow(
+            "[[step]]\naction = \"changed\"\ntarget = \"panel\"\n",
+            5_000,
+        );
+        let plan = Plan {
+            steps: vec![planned(
+                0,
+                Step::Changed {
+                    target: "panel".into(),
+                    tolerance: 0.0,
+                },
+                vec![point(1.0, 1.0)],
+            )],
+        };
+        let report = execute(
+            &mut Recording::default(),
+            &Context {
+                flow: &flow,
+                plan: &plan,
+                session: Path::new("/tmp/session"),
+                monitors: &monitors(),
+                corrections: &Corrections::new(),
+                checked: false,
+                progress: silent(),
+                waiter: waits_ok(),
+                differ: sees_change(),
+                auditor: no_audit(),
+            },
+            // Found, unmoved.
+            &mut always_found(),
+        );
+        assert_eq!(report.steps[0].outcome, StepOutcome::Verified);
     }
 
     /// `changed` looks; it never injects. The same rule `verify`, `wait`

@@ -51,7 +51,21 @@ through `pixelcoords diff`, so it sees exactly that case. Reach for
 a region is still the one you marked.
 
 `tolerance` is the percentage of the region's masked pixels that must
-differ. It defaults to `0` — any pixel. Raise it when something unrelated
+differ.
+
+`diff` compares at the position the session recorded, so a region that
+**moved** would differ for the wrong reason — the pixels there belong to
+whatever took its place. When something does differ, `changed` spends one
+re-location to rule that out, and refuses rather than claiming a change it
+cannot stand behind:
+
+```
+region "panel" moved by (0, -120) physical px, so the pixels that differ are
+whatever took its place — whether it actually changed is unknown
+```
+
+An unchanged region pays nothing extra: the search only happens when there
+is a distinction to make. It defaults to `0` — any pixel. Raise it when something unrelated
 lives inside the region: a blinking text caret is enough to register on
 its own.
 
