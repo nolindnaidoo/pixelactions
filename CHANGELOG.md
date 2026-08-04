@@ -6,6 +6,26 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## 0.9.4 — 2026-08-04
+
+**`serve` returned 3 for a session it could not read.**
+
+`docs/CLI.md` lists "missing session" under **2** — the question was
+malformed — and reserves **3** for "refused": no permission, no display, an
+unsupported platform, the kill switch, a missing `--yes`. It also says why
+the split matters: *"I can't do this here" is operationally different from
+"you asked wrong", and a CI job wants to tell them apart.*
+
+`serve` sent every startup failure back as 3, so a corrupt session file
+looked like a permissions problem. `plan` and `run` both returned 2 for the
+same file.
+
+Now a session that cannot be read exits 2, and the environment refusals —
+no injection available, a pixelcoords too old, no injector for the
+displays — keep 3. Both still write the reason to stdout as a protocol
+error, which was always right: a client is told never to read stderr as
+failure, so the alternative is a closed pipe with no explanation.
+
 ## 0.9.3 — 2026-08-04
 
 **A label on two regions clicked one of them, silently.**

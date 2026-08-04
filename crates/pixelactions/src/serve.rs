@@ -72,7 +72,13 @@ pub fn run(session_directory: &Path) -> Result<i32> {
     }
     let session = match session::load(session_directory) {
         Ok(session) => session,
-        Err(error) => return Ok(refuse_on_stdout(&format!("{error:#}"))),
+        // 2, not 3. A session that cannot be read is a malformed question,
+        // the same as a bad flow file or an unknown label -- `docs/CLI.md`
+        // lists "missing session" under 2 explicitly. 3 is for "I can't do
+        // this here": no permission, no display, an unsupported platform.
+        // The distinction is the whole reason they are separate codes, and
+        // a CI job branching on them needs it to hold.
+        Err(error) => return Ok(fail_on_stdout(&format!("{error:#}"))),
     };
     // A startup failure has to reach the client as *protocol*. A client
     // reads stdout and is told never to treat stderr as failure, so
@@ -305,9 +311,23 @@ impl Server<'_> {
 /// declined to act", so a caller reading only the exit status still
 /// learns the right thing.
 fn refuse_on_stdout(detail: &str) -> i32 {
+    say_on_stdout(detail);
+    crate::EXIT_REFUSED
+}
+
+/// The same, for a question that was malformed rather than refused.
+fn fail_on_stdout(detail: &str) -> i32 {
+    say_on_stdout(detail);
+    crate::EXIT_MALFORMED
+}
+
+/// Startup failures reach the client as *protocol* whichever code they
+/// carry: a client reads stdout and is told never to treat stderr as
+/// failure, so dying with the explanation only on stderr would leave it
+/// staring at a closed pipe with no idea why.
+fn say_on_stdout(detail: &str) {
     print!("{}", Response::error(None, detail).to_line());
     let _ = std::io::stdout().flush();
-    crate::EXIT_REFUSED
 }
 
 /// A request's verb, for error messages.
@@ -324,6 +344,22 @@ fn describe(body: &RequestBody) -> String {
 mod tests {
     use super::*;
     use pixelactions_core::flow::Verify;
+
+    /// `serve` sent every startup failure back as exit 3, including a
+    /// session it could not read. `docs/CLI.md` lists "missing session"
+    /// under 2, and says why the split matters: "I can't do this here" is
+    /// operationally different from "you asked wrong", and a CI job wants
+    /// to tell them apart. A corrupt session file is the second kind.
+    ///
+    /// Both still write the reason to stdout as protocol -- that part was
+    /// always right, and a client told to ignore stderr would otherwise
+    /// just see a closed pipe.
+    #[test]
+    fn a_malformed_question_and_a_refusal_carry_different_codes() {
+        assert_eq!(fail_on_stdout("unreadable session"), crate::EXIT_MALFORMED);
+        assert_eq!(refuse_on_stdout("no permission"), crate::EXIT_REFUSED);
+        assert_ne!(crate::EXIT_MALFORMED, crate::EXIT_REFUSED);
+    }
 
     #[test]
     fn a_verb_is_named_the_way_the_client_wrote_it() {

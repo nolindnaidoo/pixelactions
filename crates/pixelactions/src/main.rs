@@ -31,7 +31,7 @@ use pixelactions_core::plan::{Plan, plan};
 
 /// Exit codes are the API (same contract as the sister tool, plus 3):
 /// 0 done · 1 a step failed honestly · 2 malformed question · 3 refused.
-const EXIT_MALFORMED: i32 = 2;
+pub const EXIT_MALFORMED: i32 = 2;
 pub const EXIT_REFUSED: i32 = 3;
 
 fn main() {
