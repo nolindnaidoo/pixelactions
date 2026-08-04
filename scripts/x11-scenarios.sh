@@ -55,8 +55,22 @@ echo "== putting something detailed on screen"
 #
 # Both refusals are the tool behaving properly. A scenario has to give it
 # something a human would actually mark.
-convert -size 1280x1024 xc: +noise Random "$work/noise.png"
-display -window root "$work/noise.png"
+convert -size 1280x1024 xc: +noise Random "$work/noise.png" 2>&1 \
+  || { echo "  FAIL  could not generate the noise image" >&2; exit 1; }
+[ -s "$work/noise.png" ] || { echo "  FAIL  noise image is empty" >&2; exit 1; }
+
+# `display -window root` paints the root pixmap and exits. Where it is
+# unavailable — ImageMagick ships it separately on some images — fall back
+# to xsetroot with the image as a tile. Whichever works, the check below
+# is on the capture, not on the painting.
+painted=no
+if command -v display >/dev/null; then
+  display -window root "$work/noise.png" >/dev/null 2>&1 && painted=display
+fi
+if [ "$painted" = no ] && command -v xsetroot >/dev/null; then
+  xsetroot -bitmap "$work/noise.png" >/dev/null 2>&1 && painted=xsetroot
+fi
+echo "  painted via: $painted"
 sleep 1
 
 echo "== capturing it the way pixelcoords would"
