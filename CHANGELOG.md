@@ -8,6 +8,31 @@ CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 
 ## Unreleased — 0.8.1
 
+### `changed` no longer reports a region that merely moved
+
+`pixelcoords diff` compares at the position the session recorded. A region
+that **moved** therefore differs for the wrong reason — the pixels there
+belong to whatever took its place — and `changed` reported success.
+
+That is a false pass on the one assertion whose whole job is catching a
+no-op. A UI that reflowed made *did my click do something* answer **yes**
+about an element nothing had touched.
+
+When something differs, it now spends one re-location to tell the two
+apart, and refuses rather than claiming a change it cannot stand behind:
+
+```
+region "panel" moved by (0, -120) physical px, so the pixels that differ are
+whatever took its place — whether it actually changed is unknown. Re-mark
+the session, or assert on a region that stays put
+```
+
+**An unchanged region pays nothing extra.** The full-frame search happens
+only when `diff` already said something differs — the same trade a `wait`
+timeout makes, spending the expensive look only when the cheap answer is
+ambiguous.
+
+
 ### A contradictory poll config is refused in the flow file's own words
 
 ```toml
