@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## Unreleased — 0.6.0
+## 0.6.0 — 2026-08-04
 
 ### `changed` — proving an action did something
 
