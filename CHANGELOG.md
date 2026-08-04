@@ -6,6 +6,24 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## 0.9.3 — 2026-08-04
+
+**A label on two regions clicked one of them, silently.**
+
+Alt-dragging a shape in pixelcoords clones it — label and all — so two
+selections sharing a label is a normal outcome of an ordinary gesture, not
+a hand-edited file. `pixelcoords resolve` correctly answers with both.
+pixelactions took the first and acted on it: no warning, exit 0, the other
+region discarded. Which one got clicked depended on the order they were
+saved in.
+
+That is the same "acting blind" pixelcoords refuses when a match is
+ambiguous, and it should have been refused here for the same reason. A
+step whose label names more than one region is now a malformed flow —
+exit 2, before anything is touched, naming the count and the fix.
+
+Nothing changes for a session whose labels are unique.
+
 ## 0.9.2 — 2026-08-04
 
 **"about to perform 1 steps."** The line a human reads immediately before

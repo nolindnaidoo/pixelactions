@@ -44,6 +44,11 @@ pub enum PlanError {
         "selection {label:?} resolves to ({x}, {y}), which is outside every monitor in this session"
     )]
     PointOffscreen { label: String, x: i32, y: i32 },
+    #[error(
+        "{count} selections are labeled {label:?} — rename them in pixelcoords so this step names one region, \
+         or the click lands on whichever happens to be first"
+    )]
+    AmbiguousLabel { label: String, count: usize },
 }
 
 /// Resolve a flow against a session.
@@ -112,6 +117,17 @@ fn resolve_label(
         },
     })?;
 
+    // More than one selection can carry a label -- alt-dragging a shape in
+    // the overlay clones it, label and all -- and `resolve` answers with
+    // every one of them. Taking the first would act on whichever the file
+    // happened to list first, silently, which is the same "acting blind"
+    // that pixelcoords refuses when a match is ambiguous. Refuse instead.
+    if resolved.len() > 1 {
+        return Err(PlanError::AmbiguousLabel {
+            label: label.to_string(),
+            count: resolved.len(),
+        });
+    }
     let point = resolved
         .first()
         .ok_or_else(|| PlanError::UnknownLabel {
@@ -396,5 +412,40 @@ mod tests {
         assert_eq!(super::steps_phrase(1), "1 step");
         assert_eq!(super::steps_phrase(0), "0 steps");
         assert_eq!(super::steps_phrase(2), "2 steps");
+    }
+
+    /// Two selections can carry the same label -- alt-dragging a shape in
+    /// the overlay clones it, label and all. `plan` used to resolve such a
+    /// step to whichever the file listed first and act on it silently,
+    /// which is the "acting blind" pixelcoords refuses when a match is
+    /// ambiguous.
+    #[test]
+    fn a_label_on_two_selections_is_refused_rather_than_guessed() {
+        let mut session = session();
+        let mut twin = session.selections[0].clone();
+        let elsewhere = Shape::Rect(Rect::new(500, 500, 40, 20));
+        twin.px = elsewhere.clone();
+        twin.global_px = elsewhere;
+        session.selections.push(twin);
+
+        let flow = Flow {
+            session: String::new(),
+            settings: crate::flow::Settings::default(),
+            steps: vec![Step::Click {
+                target: "submit".into(),
+            }],
+        };
+        let error = plan(&flow, &session, Space::Auto).expect_err("ambiguous");
+        assert_eq!(
+            error,
+            PlanError::AmbiguousLabel {
+                label: "submit".into(),
+                count: 2,
+            },
+            "{error}"
+        );
+        // The message has to say what to do about it, not just that it
+        // happened -- the fix lives in the other tool.
+        assert!(error.to_string().contains("rename"), "{error}");
     }
 }
