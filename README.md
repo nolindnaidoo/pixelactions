@@ -269,19 +269,26 @@ and mixed-DPI layouts have not been run on real hardware yet**, only
 unit-tested. Reports from a two-screen desk are the most useful thing
 anyone could send.
 
-**Those runs were 0.2.0 through 0.4.0.** Five releases have shipped since
-— the pixelcoords seam, `changed`, the audit log, the MCP surface, and a
-round of bug fixes — and on Windows, X11 and Wayland none of them have
-been driven by hand. macOS has. They pass CI on all four platforms and
-have headless tests, which is not the same thing, and this file will say
-so until someone sits at each machine.
+**Those runs were 0.2.0 through 0.4.0.** Nine releases have shipped since
+— the pixelcoords seam, `changed`, the audit log, the MCP surface, and
+five rounds of bug fixes — and on Windows, X11 and Wayland none of them
+have been driven by hand. macOS has. This file will say so until someone
+sits at each machine.
 
-One slice of that is now automatic: `scripts/x11-scenarios.sh` runs in CI
-against a live X server, and checks that a marked region is located, that
-a click lands where `plan` said, that a cursor in a corner refuses the
-step, and that the audit log records a refused run. That is a real X
-server and a real synthetic event — on a bare 1280×1024 Xvfb with no
-window manager, which is not a desktop.
+Two slices of that are now automatic. `scripts/x11-scenarios.sh` runs in
+CI against a live X server: a marked region is located, a click lands
+where `plan` said, a cursor in a corner refuses the step, and the audit
+log records a refused run. That is a real X server and a real synthetic
+event — on a bare 1280×1024 Xvfb with no window manager, which is not a
+desktop.
+
+Everything the tool does *other* than synthesise input now runs against a
+real display on **macOS, Windows and Linux** every push: planning against
+a session marked from a genuine capture, all twelve verbs, every settings
+key, the exit codes, the refusals, the line protocol, and all three MCP
+tools. What that still cannot answer is whether a click reached an
+application, and whether the permission model let it — which is the part
+that needs a person, and the part the open *Hand-verify* issues cover.
 
 Binaries ship for the platforms that are actually supported — all four
 now. Shipping one for a platform that refuses to inject would imply

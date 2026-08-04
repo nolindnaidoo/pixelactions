@@ -6,6 +6,18 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## Where this is going
+
+The feature roadmap is essentially complete. **0.9.x is a stability
+series**: the surface — the CLI, the flow file, the line protocol, the
+agent tools — is done being added to, and what lands here from now on is
+bug fixes. Something to build against without watching for the next thing
+to move.
+
+Every 0.9.x entry below is a fix, and every one was found the same way: by
+asking automation to check something nobody had asked it to check before.
+That is the point of the series.
+
 ## 0.9.4 — 2026-08-04
 
 **`serve` returned 3 for a session it could not read.**
