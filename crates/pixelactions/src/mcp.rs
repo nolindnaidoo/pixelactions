@@ -393,7 +393,10 @@ fn tool_plan(object: &Map<String, Value>) -> Result<Value, String> {
     // Every tool answers with a top-level `ok`, because that is the field
     // the caller is told to read. A plan that returned at all resolved.
     with_ok(&mut structured, true);
-    let summary = format!("{} step(s) resolved; nothing was touched", plan.steps.len());
+    let summary = format!(
+        "{} resolved; nothing was touched",
+        pixelactions_core::plan::steps_phrase(plan.steps.len())
+    );
     Ok(report_result(&structured, &summary))
 }
 
@@ -427,7 +430,10 @@ fn tool_act(allow_acting: bool, object: &Map<String, Value>) -> Result<Value, St
     // and it must mean what the exit code means, not something adjacent.
     with_ok(&mut structured, ok);
     let summary = if ok {
-        format!("{} step(s) performed", report.steps.len())
+        format!(
+            "{} performed",
+            pixelactions_core::plan::steps_phrase(report.steps.len())
+        )
     } else {
         let failed = report
             .steps

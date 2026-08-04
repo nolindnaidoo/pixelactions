@@ -6,6 +6,17 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## 0.9.2 — 2026-08-04
+
+**"about to perform 1 steps."** The line a human reads immediately before
+consenting to have their mouse and keyboard taken over could not count.
+The MCP tools had the same fault in its form-letter dress: "1 step(s)
+resolved".
+
+A safety prompt that is visibly not paying attention is a bad prompt to
+ask for consent with, so the count is now written in one place and reads
+`1 step` or `n steps` everywhere it appears.
+
 ## 0.9.1 — 2026-08-04
 
 **The line protocol under-advertised itself.** `hello` answered with nine
