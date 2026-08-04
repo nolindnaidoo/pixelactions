@@ -73,23 +73,31 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI (`.github/workflows/ci.yml`) runs eight required jobs on every PR —
+CI (`.github/workflows/ci.yml`) runs nine required jobs on every PR —
 all must pass before anything merges to `main`:
 
 | Job | What it enforces |
 |-----|------------------|
 | `test` (macOS, Windows, Ubuntu) | fmt, clippy pedantic `-D warnings`, tests, build — per OS |
+| `scenarios` (macOS, Windows, Ubuntu) | the binary driven against a **real display**, on every platform — everything except input synthesis |
 | `xvfb` | a real synthetic event, posted to a live X server and read back |
 | `msrv` | the workspace builds on Rust 1.88 |
 | `policy` | no inline `#[allow(...)]` anywhere (workspace-level relaxations only) |
 | `coverage` | 90% line coverage floor **per module** in core |
 | `audit` | `cargo audit` |
 
-`xvfb` is the only place CI proves injection rather than building it, and
-X11 is the only platform whose display server runs on a runner. It stays a
-smoke test: a headless X server is not a desktop, and nothing there proves
-a click reached an application. **macOS, Windows and Wayland are verified
-by hand on real hardware** — see Testing below.
+`xvfb` is the only place CI proves **injection** rather than building it,
+and X11 is the only platform whose display server runs on a runner. It
+stays a smoke test: a headless X server is not a desktop, and nothing there
+proves a click reached an application.
+
+`scenarios` covers everything *else* the tool does — planning against a
+real session, the refusals, the exit codes, the flow file, the line
+protocol, the MCP surface, the match-backed verbs — on all three platforms.
+It synthesises no input. That claim stays where it can be verified rather
+than asserted: **input landing in an application is verified by hand on
+real hardware**, per platform, and the open *Hand-verify* issues carry the
+checklists.
 
 **Check the other platforms before pushing.** A helper reachable only from
 one platform's `#[cfg]` module still looks used on that platform — and is
@@ -127,6 +135,19 @@ already cost a red CI run each:
   to do and moves nothing. Ordering, settling, verification, the kill
   switch, and refusal behavior are all covered that way. Follow that
   pattern; do not mock the window system.
+- **`crates/pixelactions/tests/scenarios.rs`** drives the built binary
+  against a session marked from a genuine capture of the runner's screen:
+  every verb plans, every settings key parses, the refusals refuse, the
+  line protocol and MCP surface answer. It needs a display and
+  `pixelcoords` on `PATH`, so it is gated behind `PIXELACTIONS_SCENARIOS`
+  and only the `scenarios` job sets it.
+- The marked region there is the **whole screen**, deliberately: a smaller
+  one would have to be cut out of the capture, and cropping means an image
+  decoder this repo does not have and should not gain for a test.
+- **Do not run `scenarios` on a machine you are using.** Every match score
+  and poll count in it measures whatever is on screen at the time. A pass
+  taken on a busy desktop is luck and a failure is noise; push and read the
+  CI result instead.
 - **Input synthesis and permission behavior are verified by manual runs
   on real hardware**, per platform, and stated plainly as such. A green
   suite proves the coordinates were computed, never that anything moved.

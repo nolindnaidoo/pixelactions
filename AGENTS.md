@@ -188,6 +188,13 @@ need:
   place, so its rules are stated for every input, not just examples.
 - **Every bug fix ships with a regression test** that fails before the
   fix.
+- **Anything needing a screen belongs in `tests/scenarios.rs`**, gated
+  behind `PIXELACTIONS_SCENARIOS` and run by the `scenarios` job on all
+  three platforms: planning against a real session, the refusals, the exit
+  codes, the line protocol, the MCP surface. It synthesises no input.
+  **Never run it on a machine in use** — every match score and poll count
+  in it measures whatever is on screen at the time, so a pass is luck and
+  a failure is noise. Push and read CI.
 - **Do not mock the window system.** Real injection and permission
   behavior are verified by manual runs on real hardware, per platform,
   and stated plainly as such — never claimed from a green test.

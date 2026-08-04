@@ -3,11 +3,16 @@
 Thanks for your interest. pixelactions runs verified on **macOS**,
 **Windows**, and **Linux** — both X11 (XTEST) and Wayland (GNOME and KDE,
 via the portal + EIS path). Every platform it set out to cover is
-supported, so the most valuable contributions now are bug reports from
-real machines and small focused fixes. Multi-monitor and mixed-DPI reports
-are especially welcome on Windows: the coordinate mapping is tested for
-every pixel, but the author has only a single-display machine to run it
-on.
+supported.
+
+**The feature set is complete and 0.9.x is a stability series** — fixes
+only, so there is something dependable to build against. The most valuable
+contribution now is a bug report from a real machine: everything that can
+be checked without a person has been, on all three platforms every push,
+so what is left is what only hardware can answer. Multi-monitor and
+mixed-DPI reports are especially welcome on Windows: the coordinate
+mapping is tested for every pixel, but the author has only a
+single-display machine to run it on.
 
 This tool moves a real mouse and keyboard. That raises the bar on
 verification: see the definition of done in
