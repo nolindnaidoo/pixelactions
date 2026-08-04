@@ -225,16 +225,25 @@ pub fn parse_request(line: &str) -> Result<Request, String> {
 
 /// Every step name this build understands — the handshake's answer to
 /// "what can you do".
+///
+/// **This must list every [`Step`] variant.** A client is told to read it
+/// and degrade gracefully instead of guessing, so a verb missing here is a
+/// verb nobody sends — the executor runs it fine, but the handshake said it
+/// could not. `every_step_variant_is_advertised` is what keeps the two in
+/// step, and it is an exhaustive match so a new variant will not compile
+/// until it is added here.
 pub fn supported_verbs() -> Vec<String> {
     [
         "click",
         "double_click",
         "drag",
+        "scroll",
         "type",
         "key",
         "verify",
         "wait_for",
         "wait_gone",
+        "changed",
         "pause",
     ]
     .iter()
@@ -245,6 +254,88 @@ pub fn supported_verbs() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flow::Axis;
+
+    /// The handshake advertised nine verbs while the executor ran eleven:
+    /// `scroll` and `changed` were missing, so a client that trusted the
+    /// list — which the protocol tells it to do — would never send either,
+    /// though both worked if it guessed.
+    ///
+    /// The match is exhaustive on purpose. A twelfth variant does not
+    /// compile until someone decides what the handshake calls it.
+    #[test]
+    fn every_step_variant_is_advertised() {
+        let one_of_each = [
+            Step::Click {
+                target: String::new(),
+            },
+            Step::DoubleClick {
+                target: String::new(),
+            },
+            Step::Type {
+                text: String::new(),
+            },
+            Step::Key {
+                chord: String::new(),
+            },
+            Step::Drag {
+                from: String::new(),
+                to: String::new(),
+            },
+            Step::Scroll {
+                target: String::new(),
+                amount: 0,
+                axis: Axis::Vertical,
+            },
+            Step::Verify {
+                target: String::new(),
+            },
+            Step::WaitFor {
+                target: String::new(),
+            },
+            Step::WaitGone {
+                target: String::new(),
+            },
+            Step::Changed {
+                target: String::new(),
+                tolerance: 0.0,
+            },
+            Step::Pause { ms: 0 },
+        ];
+        let advertised = supported_verbs();
+
+        for step in one_of_each {
+            // The wire name is whatever serde tags it with, not a second
+            // list written by hand — the point is to compare the handshake
+            // against the vocabulary itself.
+            let value = serde_json::to_value(&step).expect("a step serialises");
+            let name = value["action"]
+                .as_str()
+                .expect("a tagged action")
+                .to_string();
+            assert!(
+                advertised.contains(&name),
+                "the executor runs {name:?} but the handshake does not offer it: {advertised:?}"
+            );
+        }
+    }
+
+    /// And nothing is advertised that cannot be read back — a name in the
+    /// list that no variant answers to would be the same bug pointing the
+    /// other way.
+    #[test]
+    fn every_advertised_verb_is_a_real_step() {
+        for verb in supported_verbs() {
+            let request = format!(r#"{{"do":"{verb}"}}"#);
+            let Err(error) = parse_request(&request) else {
+                continue;
+            };
+            assert!(
+                !error.contains("unknown"),
+                "{verb:?} is advertised but not understood: {error}"
+            );
+        }
+    }
 
     #[test]
     fn a_step_request_reads_the_same_vocabulary_as_flows() {
