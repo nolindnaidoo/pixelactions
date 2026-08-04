@@ -263,6 +263,30 @@ pub enum FlowError {
     Toml(#[from] toml::de::Error),
     #[error("flow has no steps — nothing to run")]
     Empty,
+    #[error(
+        "poll_ms ({poll_ms}) is longer than timeout_ms ({timeout_ms}), so a wait_for or \
+         wait_gone step would get at most one look at the screen before giving up — \
+         shorten poll_ms or lengthen timeout_ms"
+    )]
+    PollLongerThanTimeout { poll_ms: u64, timeout_ms: u64 },
+}
+
+impl Settings {
+    /// Refuse a combination that cannot do what it says.
+    ///
+    /// On `Settings` rather than in `Flow::parse` because a flow file is
+    /// not the only way settings arrive — the line protocol's `hello`
+    /// carries them too, and a rule enforced on one path is a rule with a
+    /// hole in it.
+    pub fn validate(&self) -> Result<(), FlowError> {
+        if self.poll_ms > self.timeout_ms {
+            return Err(FlowError::PollLongerThanTimeout {
+                poll_ms: self.poll_ms,
+                timeout_ms: self.timeout_ms,
+            });
+        }
+        Ok(())
+    }
 }
 
 impl Flow {
@@ -272,6 +296,12 @@ impl Flow {
         if flow.steps.is_empty() {
             return Err(FlowError::Empty);
         }
+        // In the flow file's own vocabulary, rather than surfacing from
+        // the tool this shells out to. `pixelcoords wait` refuses the same
+        // pair — correctly, on its own terms — but its message names
+        // `--interval` and `--timeout`, which are not fields a flow file
+        // has.
+        flow.settings.validate()?;
         Ok(flow)
     }
 
@@ -556,5 +586,39 @@ action = "click"
 target = "a"
 "#;
         assert!(Flow::parse(source).is_err());
+    }
+
+    /// The message must name what the reader wrote — `poll_ms` and
+    /// `timeout_ms` — not the flags of the tool this shells out to. A
+    /// flow file has no `--interval`.
+    #[test]
+    fn a_poll_longer_than_the_timeout_is_refused_in_the_flows_own_words() {
+        let error = Flow::parse(
+            "session = \"s\"\n[settings]\ntimeout_ms = 500\npoll_ms = 5000\n\n\
+             [[step]]\naction = \"wait_for\"\ntarget = \"x\"\n",
+        )
+        .expect_err("should refuse");
+        let text = error.to_string();
+        assert!(text.contains("poll_ms"), "{text}");
+        assert!(text.contains("timeout_ms"), "{text}");
+        assert!(text.contains("5000") && text.contains("500"), "{text}");
+        assert!(!text.contains("--interval"), "leaks the other tool: {text}");
+        assert!(!text.contains("--timeout"), "leaks the other tool: {text}");
+    }
+
+    /// Equal is fine: exactly one look is a choice someone can make.
+    #[test]
+    fn a_poll_equal_to_the_timeout_is_allowed() {
+        let settings = Settings {
+            poll_ms: 500,
+            timeout_ms: 500,
+            ..Settings::default()
+        };
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn the_default_settings_are_self_consistent() {
+        assert!(Settings::default().validate().is_ok());
     }
 }
