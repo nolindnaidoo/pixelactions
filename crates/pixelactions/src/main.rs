@@ -126,8 +126,8 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
 
     if !yes {
         eprintln!(
-            "about to perform {} steps — this moves your mouse and keyboard.",
-            resolved.steps.len()
+            "about to perform {} — this moves your mouse and keyboard.",
+            pixelactions_core::plan::steps_phrase(resolved.steps.len())
         );
         eprintln!(
             "run the same arguments with `plan` first to see every coordinate, then pass --yes."

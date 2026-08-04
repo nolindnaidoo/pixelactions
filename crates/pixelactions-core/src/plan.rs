@@ -127,6 +127,22 @@ fn resolve_label(
     })
 }
 
+/// `n steps`, or `1 step`.
+///
+/// Small, and worth having in one place: the count appears in the refusal
+/// a human reads before consenting to have their mouse moved, and in what
+/// the MCP tools tell a model. "1 steps" in a safety prompt reads as a
+/// tool that is not paying attention, which is not the impression to give
+/// immediately before asking for consent.
+#[must_use]
+pub fn steps_phrase(count: usize) -> String {
+    if count == 1 {
+        "1 step".to_string()
+    } else {
+        format!("{count} steps")
+    }
+}
+
 fn available_labels(session: &SessionFile) -> String {
     let labels: Vec<&str> = session
         .selections
@@ -142,8 +158,7 @@ fn available_labels(session: &SessionFile) -> String {
 
 #[cfg(test)]
 mod tests {
-    use pixelcoords_core::geometry::{Point, Size};
-    use pixelcoords_core::geometry::{Rect, Shape, ToolKind};
+    use pixelcoords_core::geometry::{Point, Rect, Shape, Size, ToolKind};
     use pixelcoords_core::session::{MonitorRecord, SelectionRecord};
 
     use super::*;
@@ -372,5 +387,14 @@ mod tests {
         // 435 / 2.0 = 217.5. Rounds to 218; truncating gave 217.
         assert!((point.y - 218.0).abs() < f64::EPSILON, "{}", point.y);
         assert!((point.x - 425.0).abs() < f64::EPSILON, "{}", point.x);
+    }
+
+    /// The refusal read "about to perform 1 steps", and the MCP tools
+    /// answered "1 step(s)" -- one ungrammatical, one a form-letter.
+    #[test]
+    fn one_step_is_singular_and_the_rest_are_not() {
+        assert_eq!(super::steps_phrase(1), "1 step");
+        assert_eq!(super::steps_phrase(0), "0 steps");
+        assert_eq!(super::steps_phrase(2), "2 steps");
     }
 }
