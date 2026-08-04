@@ -65,7 +65,7 @@ jobs:
         run: |
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
           sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 \
-            libxdo-dev libxkbcommon-dev pkg-config xvfb \
+            libxdo-dev libxkbcommon-dev pkg-config xvfb x11-utils \
             xdotool imagemagick x11-utils bc
       - run: cargo build --workspace --locked
       # The scenarios drive the real pairing, so they need the real sister
@@ -100,6 +100,106 @@ jobs:
         run: |
           xvfb-run -a --server-args="-screen 0 1280x1024x24" \
             scripts/x11-scenarios.sh
+
+  # Everything pixelactions does that is *not* input synthesis, on every
+  # platform it supports.
+  #
+  # The `xvfb` job above proves the one thing only Linux CI can prove: that
+  # a synthetic event moves a real pointer, read back from the X server. It
+  # is X11-only by construction, so until this job existed everything else
+  # -- planning against a real session, the refusal a missing --yes earns,
+  # the exit codes, the line protocol, the MCP surface, the match-backed
+  # verbs -- was proved on one platform out of four.
+  #
+  # Nothing here synthesises input. That claim stays where it can be
+  # verified rather than asserted.
+  scenarios:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - name: Install Linux input dependencies and a virtual X server
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
+          sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 \
+            libxdo-dev libxkbcommon-dev pkg-config xvfb x11-utils
+      - run: cargo build --workspace --locked
+      # The scenarios drive the real pairing, so they need the real sister
+      # binary. Fetched prebuilt rather than `cargo install`ed: pixelcoords
+      # pulls a capture stack that would cost minutes to compile for a job
+      # that only needs to run it. The version is the floor `doctor`
+      # enforces, so this also proves the pair CI claims to support works.
+      - name: Install the pixelcoords the floor requires
+        shell: bash
+        run: |
+          base=https://github.com/nolindnaidoo/pixelcoords/releases/download/v0.7.0
+          case "${{ runner.os }}-${{ runner.arch }}" in
+            macOS-ARM64)  asset=pixelcoords-v0.7.0-aarch64-apple-darwin.tar.gz ;;
+            macOS-X64)    asset=pixelcoords-v0.7.0-x86_64-apple-darwin.tar.gz ;;
+            Windows-X64)  asset=pixelcoords-v0.7.0-x86_64-pc-windows-msvc.zip ;;
+            Linux-X64)    asset=pixelcoords-v0.7.0-x86_64-unknown-linux-gnu.tar.gz ;;
+            *) echo "no pixelcoords build for ${{ runner.os }}-${{ runner.arch }}" >&2; exit 1 ;;
+          esac
+          curl -fsSL -o "/tmp/$asset" "$base/$asset"
+          mkdir -p /tmp/pxc
+          case "$asset" in
+            *.zip) unzip -q "/tmp/$asset" -d /tmp/pxc ;;
+            *)     tar xzf "/tmp/$asset" -C /tmp/pxc ;;
+          esac
+          binary=$(find /tmp/pxc -maxdepth 2 -name 'pixelcoords*' -type f | head -1)
+          dest="$HOME/.pixelcoords-bin"
+          mkdir -p "$dest"
+          cp "$binary" "$dest/"
+          chmod +x "$dest/"* || true
+          # Windows needs a native path here. The bash on the runner is
+          # MSYS, so $HOME is /c/Users/... -- a form Win32 does not resolve,
+          # which means `pixelcoords --version` succeeds in a shell step
+          # while a process spawned from a test cannot find it at all.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            dest=$(cygpath -w "$dest")
+          fi
+          echo "$dest" >> "$GITHUB_PATH"
+      - name: Prove the pairing resolves
+        shell: bash
+        run: pixelcoords --version
+      # Serially, and on Linux under a virtual X server. Concurrent captures
+      # contend for the same display: macOS failed a `shoot` when two ran at
+      # once, which is a property of screen capture rather than of this code.
+      - name: Run the scenarios against a real display
+        if: runner.os != 'Linux'
+        run: cargo test --test scenarios -- --test-threads=1
+        env:
+          PIXELACTIONS_SCENARIOS: "1"
+      # A bare virtual display is a flat color, and pixelcoords rightly
+      # refuses to match one -- it matches anywhere rather than somewhere.
+      # So the display gets something to look at, and the match-backed
+      # scenarios run here instead of skipping. Random text, because what
+      # matters is that it has detail, not what it says.
+      - name: Run the scenarios against a virtual X server
+        if: runner.os == 'Linux'
+        run: |
+          cat > /tmp/scenarios.sh <<'INNER'
+          set -e
+          lines=""
+          for _ in $(seq 1 14); do
+            lines="$lines$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+          "
+          done
+          xmessage -geometry 900x600+40+40 "$lines" &
+          sleep 2
+          PIXELACTIONS_SCENARIOS=1 XDG_SESSION_TYPE=x11 \
+            cargo test --test scenarios -- --test-threads=1
+          INNER
+          chmod +x /tmp/scenarios.sh
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" bash /tmp/scenarios.sh
 
   msrv:
     runs-on: macos-15
