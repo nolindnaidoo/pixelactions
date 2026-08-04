@@ -26,7 +26,7 @@ command -v xdotool >/dev/null || { echo "xdotool is needed to read the pointer b
 command -v convert >/dev/null || { echo "ImageMagick is needed to cut a crop" >&2; exit 2; }
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"; kill %1 2>/dev/null || true' EXIT
+trap 'rm -rf "$work"' EXIT
 
 export XDG_SESSION_TYPE=x11
 export XDG_STATE_HOME="$work/state"
@@ -44,71 +44,37 @@ check() { # check <name> <expected> <actual>
 }
 
 echo "== putting something detailed on screen"
-# A flat screen is degenerate for normalized cross-correlation — a crop of
-# one colour correlates with everything and `find` reports nothing. Text
-# gives the matcher something to lock onto, which is what a real desktop
-# has and an empty X root does not.
-xmessage -geometry 600x400+100+100 \
-  "pixelactions scenario target
-the quick brown fox jumps over the lazy dog
-0123456789 ABCDEFGHIJ klmnopqrst
-$(date +%s) deterministic-enough for one run" &
-sleep 2
+# Random noise, painted onto the root window. Two properties the matcher
+# needs and text does not have:
+#
+#   - **Detailed.** A flat crop correlates with everything; pixelcoords
+#     refuses one by name rather than matching it anywhere.
+#   - **Unique.** Text repeats — the same word at two places makes a crop
+#     match in more than one, and pixelcoords refuses that too, correctly,
+#     because an ambiguous match yields no point worth acting on.
+#
+# Both refusals are the tool behaving properly. A scenario has to give it
+# something a human would actually mark.
+convert -size 1280x1024 xc: +noise Random "$work/noise.png"
+display -window root "$work/noise.png"
+sleep 1
 
 echo "== capturing it the way pixelcoords would"
 pixelcoords shoot --out "$work" >/dev/null 2>&1
 shot="$work/screenshot-0.png"
 [ -f "$shot" ] || { echo "  FAIL  no capture written"; exit 1; }
 
-# Pick the most detailed tile rather than guessing at one. A flat crop
-# correlates with everything and pixelcoords refuses it by name — "the crop
-# is a flat color, which matches anywhere rather than somewhere" — so the
-# region has to land on actual pixels. Where the text falls depends on the
-# font the runner happens to have, which is not something to hard-code.
-W=240; H=90
-best_dev=-1; X=0; Y=0
-for cy in 110 160 210 260 310; do
-  for cx in 120 220 320 420 520; do
-    dev=$(convert "$shot" -crop "${W}x${H}+${cx}+${cy}" +repage \
-      -format "%[fx:standard_deviation]" info: 2>/dev/null || echo 0)
-    # Shell cannot compare floats; scale to an integer and compare that.
-    dev_i=$(printf '%.0f' "$(echo "$dev * 100000" | bc -l 2>/dev/null || echo 0)")
-    if [ "${dev_i:-0}" -gt "$best_dev" ]; then best_dev=$dev_i; X=$cx; Y=$cy; fi
-  done
-done
-echo "  most detailed tile at ${X},${Y} (deviation ${best_dev})"
-[ "$best_dev" -gt 100 ] || {
-  echo "  FAIL  the whole screen is flat — nothing to mark, so no scenario is meaningful" >&2
+X=400; Y=300; W=240; H=90
+dev=$(convert "$shot" -crop "${W}x${H}+${X}+${Y}" +repage \
+  -format "%[fx:standard_deviation]" info: 2>/dev/null || echo 0)
+dev_i=$(printf '%.0f' "$(echo "$dev * 100000" | bc -l 2>/dev/null || echo 0)")
+echo "  region ${X},${Y} deviation ${dev_i}"
+[ "${dev_i:-0}" -gt 100 ] || {
+  echo "  FAIL  the capture is flat — nothing to mark, so no scenario is meaningful" >&2
   exit 1
 }
 convert "$shot" -crop "${W}x${H}+${X}+${Y}" +repage "$work/crop-0-target.png"
 
-python3 - "$work" "$X" "$Y" "$W" "$H" <<'PY'
-import json, sys, subprocess
-work, x, y, w, h = sys.argv[1], *map(int, sys.argv[2:6])
-# The screen is 1280x1024 at scale 1 — X11 has no per-monitor scaling to
-# describe here, which is why this job is the X11 path and not a stand-in
-# for macOS.
-px = {"x": x, "y": y, "w": w, "h": h}
-json.dump({
-    "schema": 1,
-    "app": {"name": "pixelcoords", "version": "0.7.0"},
-    "created_utc": "2026-01-01T00:00:00Z",
-    "platform": "linux", "capture": None, "name": "x11 scenarios",
-    "monitors": [{"index": 0, "name": "screen", "primary": True,
-                  "origin_px": {"x": 0, "y": 0},
-                  "size_px": {"w": 1280, "h": 1024}, "scale": 1.0}],
-    "target": None, "measures": [],
-    "selections": [{"shape": "rect", "label": "target", "monitor": 0,
-                    "px": px, "global_px": px, "rot_deg": None,
-                    "window_px": None, "crop": "crop-0-target.png",
-                    "color": None}],
-}, open(f"{work}/session.json", "w"))
-PY
-
-# Exit 1 from `find` means "not found" — an answer, not a failure, and the
-# whole point of the exit-code contract. `set -o pipefail` would otherwise
-# kill the run on the very outcome these scenarios exist to distinguish.
 echo "== scenario: the region is locatable in a fresh capture"
 report="$work/find.json"
 pixelcoords find --session "$work" >"$report" 2>/dev/null || true
