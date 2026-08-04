@@ -89,6 +89,32 @@ echo "  most detailed tile at ${X},${Y} (deviation ${best})"
 }
 convert "$shot" -crop "${W}x${H}+${X}+${Y}" +repage "$work/crop-0-target.png"
 
+# The session a human would have saved, written by hand because the overlay
+# is interactive and there is nobody here to drive it. Everything after this
+# consumes it exactly as it would a real one.
+python3 - "$work" "$X" "$Y" "$W" "$H" <<'SESSION'
+import json, sys
+work, x, y, w, h = sys.argv[1], *map(int, sys.argv[2:6])
+px = {"x": x, "y": y, "w": w, "h": h}
+json.dump({
+    "schema": 1,
+    "app": {"name": "pixelcoords", "version": "0.7.0"},
+    "created_utc": "2026-01-01T00:00:00Z",
+    "platform": "linux", "capture": None, "name": "x11 scenarios",
+    # One screen at scale 1: X11 has no per-monitor scaling to describe,
+    # which is why this job is the X11 path and not a stand-in for macOS.
+    "monitors": [{"index": 0, "name": "screen", "primary": True,
+                  "origin_px": {"x": 0, "y": 0},
+                  "size_px": {"w": 1280, "h": 1024}, "scale": 1.0}],
+    "target": None, "measures": [],
+    "selections": [{"shape": "rect", "label": "target", "monitor": 0,
+                    "px": px, "global_px": px, "rot_deg": None,
+                    "window_px": None, "crop": "crop-0-target.png",
+                    "color": None}],
+}, open(f"{work}/session.json", "w"))
+SESSION
+[ -f "$work/session.json" ] || { echo "  FAIL  session was not written" >&2; exit 1; }
+
 echo "== scenario: the region is locatable in a fresh capture"
 report="$work/find.json"
 pixelcoords find --session "$work" >"$report" 2>/dev/null || true
