@@ -82,6 +82,15 @@ struct Report {
     native_space: pixelactions_core::convert::Space,
     session_schema_supported: u32,
     pixelcoords: PixelcoordsStatus,
+    /// Where a run's record goes, or `None` when this environment gives
+    /// nothing to resolve one from.
+    ///
+    /// Reported because the log fails to write **quietly** — a run must
+    /// not die over it — which means "is it on" is otherwise unanswerable
+    /// without going and looking. It was unanswerable on Windows for a
+    /// whole release.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audit_log: Option<String>,
     /// What this build can actually do today.
     capabilities: Capabilities,
     /// macOS only: whether this process may post synthetic events.
@@ -228,6 +237,7 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
         native_space: pixelactions_core::convert::native_space(),
         session_schema_supported: SUPPORTED_SCHEMA,
         pixelcoords: pixelcoords_status(),
+        audit_log: crate::audit::log_path().map(|p| p.display().to_string()),
         capabilities: Capabilities {
             resolve: true,
             inject: can_inject.is_ok(),
@@ -278,6 +288,13 @@ pub fn run(json: bool, probe: bool) -> Result<i32> {
         }
         (true, None) => println!("pixelcoords:     found, version unreadable"),
         (false, _) => println!("pixelcoords:     not on PATH — needed to relocate and verify"),
+    }
+    match &report.audit_log {
+        Some(path) => println!("audit log:       {path}"),
+        None => println!(
+            "audit log:       nowhere — no state directory could be resolved, so runs \
+             are not recorded"
+        ),
     }
     println!();
     println!("capabilities:");
@@ -953,6 +970,7 @@ mod tests {
             native_space: pixelactions_core::convert::Space::Physical,
             session_schema_supported: SUPPORTED_SCHEMA,
             pixelcoords: pixelcoords_status(),
+            audit_log: crate::audit::log_path().map(|p| p.display().to_string()),
             capabilities: Capabilities {
                 resolve: true,
                 inject: true,
