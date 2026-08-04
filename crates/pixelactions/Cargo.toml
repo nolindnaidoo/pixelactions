@@ -31,7 +31,7 @@ keywords = ["automation", "desktop-automation", "rpa", "computer-use", "mouse"]
 categories = ["command-line-utilities", "development-tools", "development-tools::testing"]
 
 [dependencies]
-pixelactions-core = { path = "../pixelactions-core", version = "0.6.0" }
+pixelactions-core = { path = "../pixelactions-core", version = "0.8.0" }
 pixelcoords-core = "0.7"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

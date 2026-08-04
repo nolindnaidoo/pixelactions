@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## 0.6.0 — 2026-08-03
+## 0.8.0 — 2026-08-04
 
 ### `pixelactions mcp` — the executor, reachable by a model
 
@@ -47,6 +47,8 @@ audit log because they were already there.
 Protocol revision `2026-07-28`, `2025-11-25` also accepted — the same
 pair pixelcoords speaks. No async runtime.
 
+## 0.7.0 — 2026-08-04
+
 ### The audit log
 
 A run now leaves a record. `design/07` put this under "safety and
@@ -84,6 +86,8 @@ New dependency: `time` (0.3, `formatting`), the same crate the sister tool
 carries for the same job. An audit record without a wall-clock time is not
 an audit record, and the alternative was hand-rolling civil-date
 arithmetic.
+
+## 0.6.0 — 2026-08-04
 
 ### `changed` — proving an action did something
 
