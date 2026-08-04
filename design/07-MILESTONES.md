@@ -214,6 +214,29 @@ One thing to settle in writing before any code: pixelactions **acts**,
 so unlike a read-only server it has no safe default. `--yes` is the gate
 today and a model cannot pass a CLI flag.
 
+## 0.9.0 — the audit
+
+Not a milestone that was planned, which is the point of recording it.
+
+With the roadmap through 0.8.0 shipped, the code that 0.5.0–0.8.0 added
+had never been read as a whole. Auditing it found four bugs; a second
+sweep of everything those releases had *not* touched found two more.
+Three of the six made the tool say the wrong thing confidently — a
+region reported located when it matched in three places, a region
+reported changed when it had only moved, a run recorded nowhere on the
+platform the record matters most on.
+
+The lesson worth keeping: **every one of them was in a path no test
+covered, and four of them were in code written in the same stretch that
+shipped them.** Features arriving quickly is exactly when to go back and
+read them.
+
+It also turned a slice of the manual matrix into something automatic.
+`scripts/x11-scenarios.sh` drives a live X server in CI — a marked region
+located, a click landing where `plan` said, the kill switch refusing from
+a corner, the audit log recording a refused run. The `xvfb` job proved
+one synthetic event was honored before; it now proves the loop.
+
 ## Later — the rest of the Wayland ladder
 
 Rung A shipped in 0.2.0. What remains, in order of how much it buys:
