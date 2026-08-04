@@ -46,6 +46,36 @@ pub fn meets_minimum(found: &str) -> bool {
 ///
 /// Checked once per run rather than per call: this shells out to another
 /// binary, and the answer cannot change mid-run.
+/// Refuse to act when this process is not per-monitor-DPI-aware on
+/// Windows.
+///
+/// `main` declares the awareness at startup best-effort and discards the
+/// result. That is fine for `plan` and `doctor`, which only report — but
+/// **acting** on coordinates the OS is silently rescaling against the
+/// primary monitor's scale means clicking somewhere other than the region
+/// a human marked, on any display that is not at 100%.
+///
+/// An external compatibility override can force a different mode, so the
+/// declaration succeeding is not proof. This asks what actually holds.
+///
+/// Everywhere else is `Ok`: macOS and Linux have no equivalent to get
+/// wrong.
+pub fn require_dpi_awareness() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    if !crate::win::is_per_monitor_aware_v2() {
+        return Err(
+            "this process is not per-monitor-DPI-aware, so Windows is rescaling every \
+             coordinate against the primary monitor — a click would land somewhere other \
+             than the region that was marked on any display not at 100%. Something \
+             overrode the awareness this process declares at startup, most likely a \
+             compatibility setting on the executable or the terminal launching it. \
+             `pixelactions doctor` reports what is in force"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 pub fn require_supported_pixelcoords() -> Result<(), String> {
     let status = pixelcoords_status();
     if !status.found {

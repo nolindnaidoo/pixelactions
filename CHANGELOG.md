@@ -6,7 +6,39 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## Unreleased — 0.8.1
+## Unreleased — 0.9.0
+
+Bug fixes, all of them — but one changes what a flow file is allowed to
+say, and that is what makes this a minor rather than a patch. Everything
+else here is a correction to behaviour that was wrong.
+
+### Windows refuses to act when it is not DPI-aware
+
+`main` declares per-monitor-v2 awareness at startup best-effort and
+discards the result. `doctor` asked what actually held; **the acting path
+never did**. An external compatibility override can force a different
+mode, and then Windows rescales every coordinate against the primary
+monitor — so a click lands somewhere other than the region a human marked,
+on any display not at 100%, and nothing says so.
+
+A tool that refuses an ambiguous region, a moved region, and a pixelcoords
+that is too old should refuse this too. It now does, on `run` and on the
+MCP acting path both. `plan` and `doctor` still work: they report, they do
+not inject.
+
+### Two statements that did nothing
+
+`mcp::preflight` ended with `let _ = audit::log_path();` and
+`let _ = run::no_audit();`. They existed only to silence unused imports
+and shipped that way in 0.8.0. Gone, along with the imports.
+
+### Breaking: a flow whose poll interval exceeds its timeout is refused
+
+See below. A `[settings]` block with `poll_ms` greater than `timeout_ms`
+parsed before and ran badly — one poll, then a timeout. It is now refused
+at parse time. If you have such a flow, shorten `poll_ms` or lengthen
+`timeout_ms`; it was never doing what it looked like it was doing.
+
 
 ### `changed` no longer reports a region that merely moved
 
