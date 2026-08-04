@@ -46,7 +46,7 @@ fn state_dir(
         }
         return user_profile.map(|p| PathBuf::from(p).join("AppData").join("Local"));
     }
-    home.map(|home| PathBuf::from(home).join(".local/state"))
+    home.map(|home| PathBuf::from(home).join(".local").join("state"))
 }
 
 /// Where the log lives.
@@ -150,12 +150,20 @@ mod tests {
         );
     }
 
+    /// By components, for the same reason the Windows case is: `join` uses
+    /// the host separator, so a rendered-string comparison passes only on
+    /// the platform that wrote it. This one failed on Windows CI.
     #[test]
     fn unix_uses_the_xdg_default() {
-        assert_eq!(
-            dir(None, None, None, Some("/home/me"), false),
-            Some("/home/me/.local/state".to_string())
-        );
+        let resolved =
+            state_dir(None, None, None, Some(OsStr::new("/home/me")), false).expect("a path");
+        let tail: Vec<String> = resolved
+            .components()
+            .rev()
+            .take(2)
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(tail, ["state", ".local"], "{}", resolved.display());
     }
 
     /// An explicit export wins everywhere — including Windows, where Git
