@@ -933,3 +933,201 @@ fn jsonrpc_replies(out: &Output) -> Vec<serde_json::Value> {
         .filter(|v| v.get("id").is_some())
         .collect()
 }
+
+// ---------------------------------------------------------------------------
+// The flags and tools the first audit missed
+// ---------------------------------------------------------------------------
+
+/// `--space` overrides the flow's coordinate space, and the answer has to
+/// say which space it is in — a number with the wrong space is a click in
+/// the wrong place on a scaled display.
+///
+/// The two spaces are checked against each other rather than against fixed
+/// numbers: physical is logical times the monitor's scale. That holds on a
+/// Retina macOS runner where they differ and on Windows and Linux where
+/// they do not, so the test means something everywhere instead of passing
+/// vacuously on two platforms out of three.
+#[test]
+fn every_coordinate_space_is_reported_as_the_one_that_was_asked_for() {
+    scenario!(f);
+    let point = |space: &str| -> serde_json::Value {
+        let out = run(&[
+            "plan",
+            "--session",
+            &f.path(),
+            "click:target",
+            "--space",
+            space,
+            "--json",
+        ]);
+        assert_eq!(code(&out), 0, "--space {space}: {}", stdout(&out));
+        json(&out)["steps"][0]["points"][0].clone()
+    };
+
+    let physical = point("physical");
+    let logical = point("logical");
+    let auto = point("auto");
+
+    assert_eq!(physical["space"], "physical", "{physical}");
+    assert_eq!(logical["space"], "logical", "{logical}");
+
+    let scale = logical["scale"].as_f64().unwrap_or(1.0);
+    let (px, lx) = (
+        physical["x"].as_f64().expect("an x"),
+        logical["x"].as_f64().expect("an x"),
+    );
+    assert!(
+        (px - lx * scale).abs() <= 1.0,
+        "physical {px} should be logical {lx} times the scale {scale}"
+    );
+
+    // `auto` is whichever of the two this platform's input API wants, so it
+    // must be one of them and not a third answer.
+    assert!(
+        auto["x"] == physical["x"] || auto["x"] == logical["x"],
+        "auto resolved to neither space: auto={auto} physical={physical} logical={logical}"
+    );
+}
+
+/// `doctor --probe` moves the cursor a pixel and puts it back, to prove
+/// input permission rather than assume it.
+///
+/// A runner may or may not grant that — macOS will not without TCC — so
+/// this does not assert it succeeds. It asserts the report is *honest*:
+/// the probe says it was attempted, and never claims to have confirmed
+/// something it did not observe move. A probe that reported success
+/// without moving anything would be worse than no probe.
+#[test]
+fn the_probe_reports_what_it_actually_observed() {
+    if !enabled() {
+        return;
+    }
+    let out = run(&["doctor", "--probe", "--json"]);
+    let report = json(&out);
+    let probe = &report["probe"];
+
+    assert_eq!(
+        probe["attempted"], true,
+        "--probe must record that it tried: {report}"
+    );
+    if probe["confirmed"] == true {
+        assert_eq!(
+            probe["moved"], true,
+            "a probe cannot confirm a move it did not see: {report}"
+        );
+    }
+}
+
+/// Without `--probe`, nothing is attempted — the check is opt-in because
+/// it posts a real event, and a `doctor` that moved the cursor unasked
+/// would be a surprise.
+#[test]
+fn without_the_probe_flag_nothing_is_posted() {
+    if !enabled() {
+        return;
+    }
+    let report = json(&run(&["doctor", "--json"]));
+    assert_eq!(
+        report["probe"]["attempted"], false,
+        "doctor posted an event nobody asked for: {report}"
+    );
+}
+
+/// `pixelactions_act` on a server launched without `--yes` must come back
+/// as an ordinary *refusal*, not a protocol error.
+///
+/// This is the whole reason the distinction exists: a model that reads a
+/// refusal as a broken tool retries, and a retrying model that eventually
+/// gets through is exactly the runaway this gate exists to prevent. So
+/// `isError` stays false, `ok` is false, and the text says what a human
+/// would have to do.
+#[test]
+fn acting_without_consent_is_a_refusal_not_an_error() {
+    scenario!(f);
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "protocolVersion": "2026-07-28", "capabilities": {},
+                    "clientInfo": { "name": "scenarios", "version": "0" } },
+    });
+    let call = serde_json::json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "pixelactions_act",
+                    "arguments": { "session": f.path(), "steps": ["click:target"] } },
+    });
+    let out = speak(
+        &["mcp"],
+        &format!(
+            "{initialize}
+{call}
+"
+        ),
+    );
+    let replies = jsonrpc_replies(&out);
+    let reply = replies
+        .iter()
+        .find(|r| r["id"] == 2)
+        .unwrap_or_else(|| panic!("no reply: {replies:?}"));
+
+    assert_eq!(
+        reply["result"]["isError"],
+        serde_json::Value::Bool(false),
+        "a refusal is an answer, not a broken tool: {reply}"
+    );
+    assert_eq!(
+        reply["result"]["structuredContent"]["ok"],
+        serde_json::Value::Bool(false),
+        "{reply}"
+    );
+    let text = reply["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("--yes"),
+        "the refusal must say what would allow it: {text}"
+    );
+}
+
+/// `pixelactions_find` asks pixelcoords where the regions are now. It is
+/// the read-only half of the MCP surface and is always safe, so it works
+/// with or without `--yes`.
+#[test]
+fn the_find_tool_locates_the_region() {
+    scenario!(f);
+    if !markable(&f) {
+        return;
+    }
+    let initialize = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "protocolVersion": "2026-07-28", "capabilities": {},
+                    "clientInfo": { "name": "scenarios", "version": "0" } },
+    });
+    let call = serde_json::json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "pixelactions_find",
+                    "arguments": { "session": f.path() } },
+    });
+    let out = speak(
+        &["mcp"],
+        &format!(
+            "{initialize}
+{call}
+"
+        ),
+    );
+    let replies = jsonrpc_replies(&out);
+    let reply = replies
+        .iter()
+        .find(|r| r["id"] == 2)
+        .unwrap_or_else(|| panic!("no reply: {replies:?}"));
+
+    assert_eq!(
+        reply["result"]["isError"],
+        serde_json::Value::Bool(false),
+        "{reply}"
+    );
+    assert_eq!(
+        reply["result"]["structuredContent"]["ok"],
+        serde_json::Value::Bool(true),
+        "the region is on screen, so find should say so: {reply}"
+    );
+}
