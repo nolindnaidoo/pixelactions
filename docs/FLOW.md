@@ -180,9 +180,19 @@ and a flow file has none by design. That is a job for
   other three. Leave the setting where it belongs: in the flow that needs
   it.
 
-- **`audit`** (default `true`) — append one NDJSON line per event to
-  `$XDG_STATE_HOME/pixelactions/audit.ndjson`, falling back to
-  `~/.local/state/pixelactions/audit.ndjson`.
+- **`audit`** (default `true`) — append one NDJSON line per event to a
+  per-user state directory:
+
+  | | |
+  |---|---|
+  | `XDG_STATE_HOME` set, any platform | `$XDG_STATE_HOME/pixelactions/audit.ndjson` |
+  | Windows | `%LOCALAPPDATA%\pixelactions\audit.ndjson` |
+  | macOS, Linux | `~/.local/state/pixelactions/audit.ndjson` |
+
+  `doctor` prints the resolved path, and says **nowhere** when the
+  environment gives nothing to resolve one from. That line exists because
+  the log fails to write quietly — a run must not die over it — so
+  otherwise there is no way to answer "is this on" short of going to look.
 
   The log answers *what did that run actually do* for the runs where
   nobody was watching — one at 3am, or one a model drove. It is written

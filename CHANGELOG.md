@@ -8,6 +8,34 @@ CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 
 ## Unreleased — 0.8.1
 
+### The audit log writes on Windows
+
+It never had. `log_path` resolved a state directory from `XDG_STATE_HOME`
+or `HOME`, and Windows sets neither under cmd or PowerShell — it uses
+`%LOCALAPPDATA%`. So the path resolved to nothing, the append returned
+early, and **every run recorded nothing at all**, silently, because
+failing to write is deliberately quiet.
+
+Silent was the whole problem: the feature shipped in 0.7.0 documented as
+on by default, with no platform caveat, on the platform `design/07` calls
+the one carrying the most demand — CI rigs, Citrix, kiosks. Exactly the
+unattended runs a record is for.
+
+`%LOCALAPPDATA%` now, falling back to `%USERPROFILE%\AppData\Local`;
+`XDG_STATE_HOME` still wins everywhere when it is set, since exporting it
+is a decision and Git Bash on Windows is real.
+
+**`doctor` now prints the resolved path**, and prints *nowhere* when there
+is nothing to resolve one from. Without that line there is no way to
+answer "is this on" short of going to look, which is how a whole release
+shipped with it off.
+
+CI could not have caught this: the tests covered the pure record type,
+and the path lives in the binary. The resolution is now a pure function
+taking the platform as an argument, so all three are tested from any one
+of them.
+
+
 ### `pixelactions_find` no longer calls an ambiguous match located
 
 Over MCP it counted regions that were *found*, ignoring whether the crop
