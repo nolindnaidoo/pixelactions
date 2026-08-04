@@ -65,7 +65,8 @@ jobs:
         run: |
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
           sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 \
-            libxdo-dev libxkbcommon-dev pkg-config xvfb
+            libxdo-dev libxkbcommon-dev pkg-config xvfb \
+            xdotool imagemagick x11-utils
       - run: cargo build --workspace --locked
       # `doctor --probe` reads the cursor, moves it one pixel, asks the
       # server where it ended up and puts it back — so exit 0 means the
@@ -76,6 +77,16 @@ jobs:
         run: |
           xvfb-run -a --server-args="-screen 0 1280x1024x24" \
             env XDG_SESSION_TYPE=x11 ./target/debug/pixelactions doctor --probe
+      # The probe above proves one synthetic event is honored. This proves
+      # the product: a session marked from a real capture resolves to a
+      # coordinate, the coordinate survives conversion, XTEST accepts it,
+      # and the pointer lands on the marked region — read back from the
+      # server rather than assumed. Also covers the audit log and the exit
+      # codes on a real display.
+      - name: Run the acting scenarios against a live X server
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
+            scripts/x11-scenarios.sh
 
   msrv:
     runs-on: macos-15
