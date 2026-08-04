@@ -12,7 +12,7 @@ crate.
 
 ```toml
 [dependencies]
-pixelactions-core = "0.5"
+pixelactions-core = "0.8"
 ```
 
 ## What you'd use it for
