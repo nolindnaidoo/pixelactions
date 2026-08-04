@@ -155,10 +155,18 @@ jobs:
             *)     tar xzf "/tmp/$asset" -C /tmp/pxc ;;
           esac
           binary=$(find /tmp/pxc -maxdepth 2 -name 'pixelcoords*' -type f | head -1)
-          mkdir -p "$HOME/.pixelcoords-bin"
-          cp "$binary" "$HOME/.pixelcoords-bin/"
-          chmod +x "$HOME/.pixelcoords-bin/"* || true
-          echo "$HOME/.pixelcoords-bin" >> "$GITHUB_PATH"
+          dest="$HOME/.pixelcoords-bin"
+          mkdir -p "$dest"
+          cp "$binary" "$dest/"
+          chmod +x "$dest/"* || true
+          # Windows needs a native path here. The bash on the runner is
+          # MSYS, so $HOME is /c/Users/... -- a form Win32 does not resolve,
+          # which means `pixelcoords --version` succeeds in a shell step
+          # while a process spawned from a test cannot find it at all.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            dest=$(cygpath -w "$dest")
+          fi
+          echo "$dest" >> "$GITHUB_PATH"
       - name: Prove the pairing resolves
         shell: bash
         run: pixelcoords --version

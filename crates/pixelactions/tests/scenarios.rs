@@ -411,10 +411,12 @@ fn run_without_yes_refuses_and_says_what_it_would_have_done() {
         stdout(&out),
         String::from_utf8_lossy(&out.stderr)
     );
+    // A refusal has to leave someone able to proceed, so it names both the
+    // safe way to look first and the flag that consents.
     let said = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
     assert!(
-        said.contains("target"),
-        "a refusal that does not say what it refused is not useful: {said}"
+        said.contains("plan") && said.contains("--yes"),
+        "a refusal must say how to proceed: {said}"
     );
 }
 
@@ -568,13 +570,33 @@ fn serve_accepts_every_verb_it_advertises() {
     assert!(!verbs.is_empty(), "{welcome}");
 
     for verb in verbs {
-        // Sent with every field the step shapes need, so a rejection is
-        // about the verb rather than a missing argument.
-        let request = serde_json::json!({
-            "id": 9, "do": verb,
-            "target": "target", "from": "target", "to": "target",
-            "text": "x", "chord": "a", "amount": 1, "ms": 1,
-        });
+        // Steps deny unknown fields, so each verb gets exactly its own --
+        // otherwise a rejection would be about the extra keys rather than
+        // about whether the verb is understood.
+        let mut request = serde_json::json!({ "id": 9, "do": verb });
+        let fields = request.as_object_mut().expect("an object");
+        match verb.as_str() {
+            "drag" => {
+                fields.insert("from".into(), "target".into());
+                fields.insert("to".into(), "target".into());
+            }
+            "scroll" => {
+                fields.insert("target".into(), "target".into());
+                fields.insert("amount".into(), 1.into());
+            }
+            "type" => {
+                fields.insert("text".into(), "x".into());
+            }
+            "key" => {
+                fields.insert("chord".into(), "a".into());
+            }
+            "pause" => {
+                fields.insert("ms".into(), 1.into());
+            }
+            _ => {
+                fields.insert("target".into(), "target".into());
+            }
+        }
         let out = speak(
             &["serve", "--session", &f.path()],
             &format!("{hello}\n{request}\n"),
