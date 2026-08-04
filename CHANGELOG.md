@@ -6,6 +6,22 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
+## 0.9.1 — 2026-08-04
+
+**The line protocol under-advertised itself.** `hello` answered with nine
+verbs while the executor ran eleven: `scroll` and `changed` were missing
+from the list.
+
+Both worked if a client sent them anyway — nothing filtered them — but the
+protocol tells a client to read `verbs` and "degrade gracefully instead of
+guessing", so a client that did as it was told would never send either. A
+`changed` step is the strongest post-action check pixelactions has, and
+over the protocol it was invisible.
+
+Fixed by listing every step the executor understands. The guard is an
+exhaustive match over `Step`, so a twelfth verb will not compile until the
+handshake has a name for it — the drift cannot recur silently.
+
 ## 0.9.0 — 2026-08-04
 
 **Six bug fixes, no new features.** Four were found by auditing the code
