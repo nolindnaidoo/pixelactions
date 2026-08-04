@@ -161,6 +161,14 @@ impl Server<'_> {
             };
         }
         if let Some(settings) = settings {
+            // The same rule a flow file gets. A client that asks for a
+            // poll longer than its timeout is told here, at the
+            // handshake, rather than on whichever step first waits.
+            if let Err(reason) = settings.validate() {
+                return ResponseBody::Error {
+                    detail: reason.to_string(),
+                };
+            }
             self.settings = settings;
         }
         self.greeted = true;

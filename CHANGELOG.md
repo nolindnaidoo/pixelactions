@@ -8,6 +8,38 @@ CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 
 ## Unreleased — 0.8.1
 
+### A contradictory poll config is refused in the flow file's own words
+
+```toml
+timeout_ms = 500
+poll_ms = 5000
+```
+
+used to fail mid-run with `pixelcoords wait refused: --interval 5s is
+longer than --timeout 500ms`. The reader set `poll_ms` and `timeout_ms`;
+they have no `--interval`, and the fields that message told them to change
+do not exist in a flow file.
+
+Now:
+
+```
+poll_ms (5000) is longer than timeout_ms (500), so a wait_for or wait_gone
+step would get at most one look at the screen before giving up — shorten
+poll_ms or lengthen timeout_ms
+```
+
+Refused at parse time, before a run starts and before anything is
+injected, rather than on whichever step first waits.
+
+The rule lives on `Settings`, not in `Flow::parse`, because a flow file is
+not the only way settings arrive — the line protocol's `hello` carries
+them too, and a rule enforced on one path is a rule with a hole in it.
+`serve` now refuses the same pair at the handshake.
+
+This was a regression from 0.6.0: before the polling loop moved into
+`pixelcoords wait`, the same flow did one poll and timed out normally.
+
+
 ### The audit log writes on Windows
 
 It never had. `log_path` resolved a state directory from `XDG_STATE_HOME`
