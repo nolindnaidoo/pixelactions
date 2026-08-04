@@ -65,7 +65,7 @@ jobs:
         run: |
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
           sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 \
-            libxdo-dev libxkbcommon-dev pkg-config xvfb \
+            libxdo-dev libxkbcommon-dev pkg-config xvfb x11-utils \
             xdotool imagemagick x11-utils bc
       - run: cargo build --workspace --locked
       # The scenarios drive the real pairing, so they need the real sister
@@ -130,7 +130,7 @@ jobs:
         run: |
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=15
           sudo apt-get install -y -o Acquire::Retries=3 -o Acquire::http::Timeout=15 \
-            libxdo-dev libxkbcommon-dev pkg-config xvfb
+            libxdo-dev libxkbcommon-dev pkg-config xvfb x11-utils
       - run: cargo build --workspace --locked
       # The scenarios drive the real pairing, so they need the real sister
       # binary. Fetched prebuilt rather than `cargo install`ed: pixelcoords
@@ -178,12 +178,28 @@ jobs:
         run: cargo test --test scenarios -- --test-threads=1
         env:
           PIXELACTIONS_SCENARIOS: "1"
+      # A bare virtual display is a flat color, and pixelcoords rightly
+      # refuses to match one -- it matches anywhere rather than somewhere.
+      # So the display gets something to look at, and the match-backed
+      # scenarios run here instead of skipping. Random text, because what
+      # matters is that it has detail, not what it says.
       - name: Run the scenarios against a virtual X server
         if: runner.os == 'Linux'
         run: |
-          xvfb-run -a --server-args="-screen 0 1280x1024x24" \
-            env XDG_SESSION_TYPE=x11 PIXELACTIONS_SCENARIOS=1 \
+          cat > /tmp/scenarios.sh <<'INNER'
+          set -e
+          lines=""
+          for _ in $(seq 1 14); do
+            lines="$lines$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+          "
+          done
+          xmessage -geometry 900x600+40+40 "$lines" &
+          sleep 2
+          PIXELACTIONS_SCENARIOS=1 XDG_SESSION_TYPE=x11 \
             cargo test --test scenarios -- --test-threads=1
+          INNER
+          chmod +x /tmp/scenarios.sh
+          xvfb-run -a --server-args="-screen 0 1280x1024x24" bash /tmp/scenarios.sh
 
   msrv:
     runs-on: macos-15

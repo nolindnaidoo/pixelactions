@@ -466,12 +466,42 @@ fn a_flow_with_an_unknown_verb_exits_two() {
 // Match-backed verbs, against the screen as it actually is
 // ---------------------------------------------------------------------------
 
+/// Whether the marked region can be matched at all.
+///
+/// A capture of an empty desktop is a flat color, and pixelcoords refuses
+/// to match one — "it matches anywhere rather than somewhere" — which is
+/// the correct answer, not a failure. A bare Linux or macOS runner shows
+/// exactly that, so the match-backed scenarios below ask first rather than
+/// asserting into it and reporting a bug that is not there.
+///
+/// The question goes to `find`, which is the thing that would have to
+/// answer it anyway. Nothing here guesses from pixel values.
+fn markable(f: &Fixture) -> bool {
+    let out = std::process::Command::new("pixelcoords")
+        .args(["find", "--session", &f.path()])
+        .output()
+        .expect("pixelcoords is on PATH");
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    let result = &report["results"][0];
+    let usable = result["found"] == true && result["ambiguous"] != true;
+    if !usable {
+        eprintln!(
+            "skipped: this display cannot be matched against -- {}",
+            result["reason"].as_str().unwrap_or("no reason given")
+        );
+    }
+    usable
+}
+
 /// `verify` asks pixelcoords whether the region is still there. Against the
-/// screen it was captured from, it is — this proves the whole call-out path,
-/// session to `find` to report, on every platform.
+/// screen it was captured from, it is — this proves the whole call-out
+/// path, session to `find` to report.
 #[test]
 fn verify_confirms_the_region_against_a_fresh_capture() {
     scenario!(f);
+    if !markable(&f) {
+        return;
+    }
     let out = run(&[
         "run",
         "--session",
@@ -495,6 +525,9 @@ fn verify_confirms_the_region_against_a_fresh_capture() {
 #[test]
 fn wait_returns_at_once_when_the_region_is_already_there() {
     scenario!(f);
+    if !markable(&f) {
+        return;
+    }
     let out = run(&[
         "run",
         "--session",
@@ -507,6 +540,33 @@ fn wait_returns_at_once_when_the_region_is_already_there() {
         code(&out),
         0,
         "wait did not return: {}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// A flat screen is refused, and refused as a *negative answer* rather than
+/// an error — exit 1, not 2. This is the case a bare CI desktop actually
+/// produces, so it is worth pinning: a caller that cannot tell "nothing to
+/// match" from "your flow is wrong" will retry forever.
+#[test]
+fn an_unmatchable_region_is_a_negative_answer_not_an_error() {
+    scenario!(f);
+    if markable(&f) {
+        return;
+    }
+    let out = run(&[
+        "run",
+        "--session",
+        &f.path(),
+        "verify:target",
+        "--yes",
+        "--json",
+    ]);
+    assert_eq!(
+        code(&out),
+        1,
+        "an unmatchable region is exit 1: {}{}",
         stdout(&out),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -641,16 +701,23 @@ fn the_mcp_server_plans_the_same_point_as_the_cli() {
         .iter()
         .find(|r| r["id"] == 2)
         .unwrap_or_else(|| panic!("no reply to the call: {replies:?}"));
-    let text = result["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_else(|| panic!("no text in {result}"));
-    let plan: serde_json::Value =
-        serde_json::from_str(text).unwrap_or_else(|e| panic!("tool text is not JSON: {e}\n{text}"));
     assert_eq!(
         result["result"]["isError"],
         serde_json::Value::Bool(false),
         "a plan that resolved is not an error: {result}"
     );
+    // The data is in `structuredContent`; `content[0].text` is the sentence
+    // a model reads. Both are checked, because a tool that answered only in
+    // prose would be unusable to a caller and one that answered only in
+    // JSON would be unreadable to the model.
+    let plan = &result["result"]["structuredContent"];
+    assert!(
+        result["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|t| !t.is_empty()),
+        "a tool result with no sentence in it: {result}"
+    );
+    assert_eq!(plan["ok"], true, "a plan that resolved says so: {plan}");
 
     let cli = json(&run(&[
         "plan",
