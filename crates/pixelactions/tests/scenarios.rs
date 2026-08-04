@@ -334,24 +334,124 @@ fn plan_leaves_the_session_untouched() {
     assert_eq!(before, after, "plan rewrote the session");
 }
 
-/// Every verb that takes a label should plan against the same session.
-/// A verb the chain grammar accepts but cannot resolve is a verb the help
-/// text promises and the tool refuses.
+/// **Every verb the chain grammar accepts, planned.**
+///
+/// Not just the ones that take a bare label: `scroll` and `hscroll` need
+/// `label>amount`, `drag` needs `from>to`, `type` and `key` take no label
+/// at all. A verb the help text advertises and the planner refuses is a
+/// promise the tool does not keep, and the ones with unusual grammar are
+/// exactly where that goes unnoticed.
 #[test]
-fn every_labelled_verb_plans() {
+fn every_verb_the_grammar_accepts_plans() {
     scenario!(f);
-    for verb in ["click", "double", "verify", "wait", "gone", "changed"] {
-        let step = format!("{verb}:target");
-        let out = run(&["plan", "--session", &f.path(), &step, "--json"]);
-        assert_eq!(code(&out), 0, "{verb} did not plan: {}", stdout(&out));
+    let cases = [
+        ("click:target", "click"),
+        ("double:target", "double-click"),
+        ("verify:target", "verify"),
+        ("wait:target", "wait"),
+        ("gone:target", "gone"),
+        ("changed:target", "changed"),
+        ("scroll:target>3", "scroll"),
+        ("hscroll:target>-2", "scroll"),
+        ("drag:target>target", "drag"),
+        ("type:hello", "type"),
+        ("key:cmd+s", "key"),
+        ("pause:5", "pause"),
+    ];
+
+    for (step, expected) in cases {
+        let out = run(&["plan", "--session", &f.path(), step, "--json"]);
+        assert_eq!(code(&out), 0, "{step} did not plan: {}", stdout(&out));
 
         let plan = json(&out);
         let summary = plan["steps"][0]["summary"].as_str().unwrap_or_default();
         assert!(
-            summary.contains("target"),
-            "{verb} planned without naming its target: {plan}"
+            summary.contains(expected),
+            "{step} summarised as {summary:?}, expected it to mention {expected:?}"
         );
     }
+}
+
+/// A verb with unusual grammar, given the wrong shape, is refused with the
+/// grammar spelled out — `scroll` without its amount is the case a caller
+/// actually hits, and being told "scroll needs label>amount" is the
+/// difference between a fix and a guess.
+#[test]
+fn a_verb_given_the_wrong_shape_is_refused_with_its_grammar() {
+    scenario!(f);
+    let out = run(&["plan", "--session", &f.path(), "scroll:target", "--json"]);
+    assert_eq!(code(&out), 2, "{}", stdout(&out));
+
+    let said = format!("{}{}", stdout(&out), String::from_utf8_lossy(&out.stderr));
+    assert!(
+        said.contains("label>amount") || said.contains('>'),
+        "the refusal should show the grammar: {said}"
+    );
+}
+
+/// Every settings key a flow file may carry is accepted.
+///
+/// These have no CLI flag — a flow file is the only way to set them — so
+/// nothing else in this harness would notice a key that stopped parsing.
+/// `failsafe` in particular is the one the match-backed scenarios depend
+/// on, and a silent rename would turn the kill switch back on in CI
+/// without a single test failing.
+#[test]
+fn every_settings_key_a_flow_may_carry_is_accepted() {
+    scenario!(f);
+    let flow = f.write(
+        "settings.toml",
+        &format!(
+            "session = {:?}\n\n[settings]\n\
+             relocate = false\n\
+             settle_ms = 5\n\
+             timeout_ms = 100\n\
+             poll_ms = 10\n\
+             failsafe = false\n\
+             failsafe_margin = 3.0\n\
+             audit = false\n\
+             \n[[step]]\naction = \"click\"\ntarget = \"target\"\n",
+            f.path()
+        ),
+    );
+    let out = run(&["plan", "--flow", &flow, "--json"]);
+    assert_eq!(
+        code(&out),
+        0,
+        "a flow using every settings key was refused: {}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let plan = json(&out);
+    assert_eq!(
+        plan["settings"]["relocate"], false,
+        "the setting reached the plan: {plan}"
+    );
+}
+
+/// A settings key this build does not have is refused rather than ignored.
+/// A silently-dropped setting is one someone believes is in effect — and
+/// for `failsafe` that belief is about a safety mechanism.
+#[test]
+fn an_unknown_settings_key_is_refused() {
+    scenario!(f);
+    let flow = f.write(
+        "bad-settings.toml",
+        &format!(
+            "session = {:?}\n\n[settings]\nfailsafe_margins = 3.0\n\
+             \n[[step]]\naction = \"click\"\ntarget = \"target\"\n",
+            f.path()
+        ),
+    );
+    let out = run(&["plan", "--flow", &flow, "--json"]);
+    assert_eq!(
+        code(&out),
+        2,
+        "{}{}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// A plan of several steps keeps them in order and resolves each. An
