@@ -130,13 +130,23 @@ planned=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["steps"][0
 check "plan resolves to the region's centre" "$((X + W / 2)),$((Y + H / 2))" "$planned"
 
 echo "== scenario: a click puts the pointer exactly there"
-xdotool mousemove 0 0
+# Park mid-screen, not at 0,0. A corner is where the kill switch watches,
+# and this scenario is about placement — the corner gets its own below.
+xdotool mousemove 640 512
 # Kept, not discarded: a refusal here is the interesting outcome, and a
 # scenario that hides why it refused is worth less than no scenario.
 "$bin" run --session "$work" click:target --yes >"$work/run.log" 2>&1 || true
 sed 's/^/      | /' "$work/run.log"
 landed=$(xdotool getmouselocation --shell | awk -F= '/^X=/{x=$2} /^Y=/{y=$2} END{print x","y}')
 check "the pointer landed on the marked region" "$planned" "$landed"
+
+echo "== scenario: the kill switch stops a run from a corner"
+xdotool mousemove 0 0
+"$bin" run --session "$work" click:target --yes >"$work/corner.log" 2>&1 && corner=0 || corner=$?
+grep -q "kill switch" "$work/corner.log" && said=yes || said=no
+check "a cursor in a corner refuses the step" "yes" "$said"
+check "and the run exits refused" "3" "$corner"
+xdotool mousemove 640 512
 
 echo "== scenario: the audit log records it"
 log="$XDG_STATE_HOME/pixelactions/audit.ndjson"
