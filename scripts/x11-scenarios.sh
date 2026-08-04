@@ -60,8 +60,27 @@ pixelcoords shoot --out "$work" >/dev/null 2>&1
 shot="$work/screenshot-0.png"
 [ -f "$shot" ] || { echo "  FAIL  no capture written"; exit 1; }
 
-# A region inside the xmessage window, well away from its edges.
-X=200; Y=200; W=240; H=90
+# Pick the most detailed tile rather than guessing at one. A flat crop
+# correlates with everything and pixelcoords refuses it by name — "the crop
+# is a flat color, which matches anywhere rather than somewhere" — so the
+# region has to land on actual pixels. Where the text falls depends on the
+# font the runner happens to have, which is not something to hard-code.
+W=240; H=90
+best_dev=-1; X=0; Y=0
+for cy in 110 160 210 260 310; do
+  for cx in 120 220 320 420 520; do
+    dev=$(convert "$shot" -crop "${W}x${H}+${cx}+${cy}" +repage \
+      -format "%[fx:standard_deviation]" info: 2>/dev/null || echo 0)
+    # Shell cannot compare floats; scale to an integer and compare that.
+    dev_i=$(printf '%.0f' "$(echo "$dev * 100000" | bc -l 2>/dev/null || echo 0)")
+    if [ "${dev_i:-0}" -gt "$best_dev" ]; then best_dev=$dev_i; X=$cx; Y=$cy; fi
+  done
+done
+echo "  most detailed tile at ${X},${Y} (deviation ${best_dev})"
+[ "$best_dev" -gt 100 ] || {
+  echo "  FAIL  the whole screen is flat — nothing to mark, so no scenario is meaningful" >&2
+  exit 1
+}
 convert "$shot" -crop "${W}x${H}+${X}+${Y}" +repage "$work/crop-0-target.png"
 
 python3 - "$work" "$X" "$Y" "$W" "$H" <<'PY'
