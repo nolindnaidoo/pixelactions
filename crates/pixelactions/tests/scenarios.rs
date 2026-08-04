@@ -176,6 +176,23 @@ impl Fixture {
         (f64::from(self.w) / 2.0, f64::from(self.h) / 2.0)
     }
 
+    /// A flow file with the corner kill switch off.
+    ///
+    /// The switch exists so a human can abort a runaway automation by
+    /// slamming the pointer into a corner. CI has no human and no control
+    /// over where the pointer rests — the macOS runner leaves it at
+    /// (10, 10), which is inside the margin — so leaving it on would stop
+    /// every run before its first step, and prove nothing about the step.
+    fn flow(&self, name: &str, steps: &str) -> String {
+        self.write(
+            name,
+            &format!(
+                "session = {:?}\n\n[settings]\nfailsafe = false\n\n{steps}",
+                self.path()
+            ),
+        )
+    }
+
     fn write(&self, name: &str, body: &str) -> String {
         let path = self.dir.join(name);
         std::fs::write(&path, body).expect("fixture file written");
@@ -502,14 +519,11 @@ fn verify_confirms_the_region_against_a_fresh_capture() {
     if !markable(&f) {
         return;
     }
-    let out = run(&[
-        "run",
-        "--session",
-        &f.path(),
-        "verify:target",
-        "--yes",
-        "--json",
-    ]);
+    let flow = f.flow(
+        "verify.toml",
+        "[[step]]\naction = \"verify\"\ntarget = \"target\"\n",
+    );
+    let out = run(&["run", "--flow", &flow, "--yes", "--json"]);
     assert_eq!(
         code(&out),
         0,
@@ -528,14 +542,11 @@ fn wait_returns_at_once_when_the_region_is_already_there() {
     if !markable(&f) {
         return;
     }
-    let out = run(&[
-        "run",
-        "--session",
-        &f.path(),
-        "wait:target",
-        "--yes",
-        "--json",
-    ]);
+    let flow = f.flow(
+        "wait.toml",
+        "[[step]]\naction = \"wait_for\"\ntarget = \"target\"\n",
+    );
+    let out = run(&["run", "--flow", &flow, "--yes", "--json"]);
     assert_eq!(
         code(&out),
         0,
@@ -555,14 +566,11 @@ fn an_unmatchable_region_is_a_negative_answer_not_an_error() {
     if markable(&f) {
         return;
     }
-    let out = run(&[
-        "run",
-        "--session",
-        &f.path(),
-        "verify:target",
-        "--yes",
-        "--json",
-    ]);
+    let flow = f.flow(
+        "unmatchable.toml",
+        "[[step]]\naction = \"verify\"\ntarget = \"target\"\n",
+    );
+    let out = run(&["run", "--flow", &flow, "--yes", "--json"]);
     assert_eq!(
         code(&out),
         1,
