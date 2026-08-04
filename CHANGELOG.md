@@ -6,7 +6,7 @@ follow [Semantic Versioning](https://semver.org). Pre-1.0 policy:
 CLI, the flow file, or the line protocol; **patch** (0.x.y) for fixes.
 1.0.0 comes when those three are declared stable.
 
-## Unreleased — 0.6.0
+## 0.7.0 — 2026-08-04
 
 ### The audit log
 
@@ -45,6 +45,8 @@ New dependency: `time` (0.3, `formatting`), the same crate the sister tool
 carries for the same job. An audit record without a wall-clock time is not
 an audit record, and the alternative was hand-rolling civil-date
 arithmetic.
+
+## 0.6.0 — 2026-08-04
 
 ### `changed` — proving an action did something
 
