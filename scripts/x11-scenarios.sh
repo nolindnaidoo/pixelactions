@@ -18,6 +18,13 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 bin="$root/target/debug/pixelactions"
 [ -x "$bin" ] || bin="$root/target/release/pixelactions"
+command -v pixelcoords >/dev/null || {
+  echo "pixelcoords is not on PATH — the scenarios drive the real pairing" >&2
+  exit 2
+}
+command -v xdotool >/dev/null || { echo "xdotool is needed to read the pointer back" >&2; exit 2; }
+command -v convert >/dev/null || { echo "ImageMagick is needed to cut a crop" >&2; exit 2; }
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"; kill %1 2>/dev/null || true' EXIT
 
