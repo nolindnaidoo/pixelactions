@@ -106,7 +106,10 @@ check "plan resolves to the region's centre" "$((X + W / 2)),$((Y + H / 2))" "$p
 
 echo "== scenario: a click puts the pointer exactly there"
 xdotool mousemove 0 0
-"$bin" run --session "$work" click:target --yes >/dev/null 2>&1 || true
+# Kept, not discarded: a refusal here is the interesting outcome, and a
+# scenario that hides why it refused is worth less than no scenario.
+"$bin" run --session "$work" click:target --yes >"$work/run.log" 2>&1 || true
+sed 's/^/      | /' "$work/run.log"
 landed=$(xdotool getmouselocation --shell | awk -F= '/^X=/{x=$2} /^Y=/{y=$2} END{print x","y}')
 check "the pointer landed on the marked region" "$planned" "$landed"
 
