@@ -87,14 +87,18 @@ json.dump({
 }, open(f"{work}/session.json", "w"))
 PY
 
+# Exit 1 from `find` means "not found" — an answer, not a failure, and the
+# whole point of the exit-code contract. `set -o pipefail` would otherwise
+# kill the run on the very outcome these scenarios exist to distinguish.
 echo "== scenario: the region is locatable in a fresh capture"
-found=$(pixelcoords find --session "$work" 2>/dev/null \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["results"][0]["found"])')
+report="$work/find.json"
+pixelcoords find --session "$work" >"$report" 2>/dev/null || true
+found=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["results"][0]["found"])' "$report" 2>/dev/null || echo "unreadable")
 check "find locates the marked region" "True" "$found"
 
 echo "== scenario: plan resolves without touching anything"
-planned=$("$bin" plan --session "$work" click:target --json 2>/dev/null \
-  | python3 -c 'import json,sys; p=json.load(sys.stdin)["steps"][0]["points"][0]; print(f"{p[\"x\"]:.0f},{p[\"y\"]:.0f}")')
+"$bin" plan --session "$work" click:target --json >"$work/plan.json" 2>/dev/null || true
+planned=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1]))["steps"][0]["points"][0]; print("%.0f,%.0f" % (p["x"], p["y"]))' "$work/plan.json" 2>/dev/null || echo "unreadable")
 # The click point of a rect is its centre, in physical pixels, because
 # XTEST's space is the session's space and `Space::Auto` resolves to
 # physical on Linux.
