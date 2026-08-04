@@ -113,6 +113,13 @@ fn run_flow(source: &Source, json: bool, yes: bool) -> Result<i32> {
         eprintln!("pixelactions: {reason}");
         return Ok(EXIT_REFUSED);
     }
+    // Only the acting path checks this. `plan` and `doctor` report; a run
+    // injects, and injecting against a rescaled coordinate space clicks
+    // the wrong place without saying so.
+    if let Err(reason) = doctor::require_dpi_awareness() {
+        eprintln!("pixelactions: {reason}");
+        return Ok(EXIT_REFUSED);
+    }
     let (flow, session_path, session) = load_flow(source)?;
     let space = flow.settings.space;
     let resolved = plan(&flow, &session, space)?;
@@ -327,6 +334,7 @@ pub fn plan_source(source: &Source) -> Result<(Plan, serde_json::Value)> {
 pub fn act_source(source: &Source) -> Result<pixelactions_core::report::RunReport> {
     inject::availability().map_err(|reason| anyhow::anyhow!("{reason}"))?;
     doctor::require_supported_pixelcoords().map_err(|reason| anyhow::anyhow!("{reason}"))?;
+    doctor::require_dpi_awareness().map_err(|reason| anyhow::anyhow!("{reason}"))?;
 
     let (flow, session_path, session) = load_flow(source)?;
     let space = flow.settings.space;

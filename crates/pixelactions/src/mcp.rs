@@ -46,7 +46,7 @@ use std::io::{BufRead, Write};
 use anyhow::Result;
 use serde_json::{Map, Value, json};
 
-use crate::{Source, audit, doctor, inject, run, verify};
+use crate::{Source, doctor, inject, verify};
 
 /// Revisions this server speaks, newest first. Matches pixelcoords, so a
 /// client driving both halves of the loop negotiates once.
@@ -488,11 +488,14 @@ pub fn preflight(allow_acting: bool) -> Option<String> {
     if let Err(reason) = doctor::require_supported_pixelcoords() {
         return Some(reason);
     }
-    if allow_acting && let Err(reason) = inject::availability() {
-        return Some(reason);
+    if allow_acting {
+        if let Err(reason) = inject::availability() {
+            return Some(reason);
+        }
+        if let Err(reason) = doctor::require_dpi_awareness() {
+            return Some(reason);
+        }
     }
-    let _ = audit::log_path();
-    let _ = run::no_audit();
     None
 }
 
