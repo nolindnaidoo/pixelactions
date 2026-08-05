@@ -8,7 +8,7 @@ name = "pixelactions"
 # protocol, so a user should never have to reason about which client
 # version pairs with which pixelactions -- they are the same number.
 # `tests/test_version.py` fails if this drifts from the workspace.
-version = "0.9.6"
+version = "0.9.7"
 description = "Drive desktop interactions from a human-marked pixelcoords session: click a label, not a coordinate, and confirm it landed"
 readme = "README.md"
 requires-python = ">=3.9"
