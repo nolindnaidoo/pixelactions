@@ -10,14 +10,18 @@ Examples:
   pixelactions serve --session DIR       drive it from your own program
   pixelactions doctor --probe            prove input permission, harmlessly
 
-Verbs: click double verify wait gone type key drag:FROM>TO
-       scroll:LABEL>N hscroll:LABEL>N pause:MS
+Verbs, every one of them:
+  click:LABEL      double:LABEL     verify:LABEL
+  wait:LABEL       gone:LABEL       changed:LABEL
+  type:TEXT        key:CHORD        pause:MS
+  drag:FROM>TO     scroll:LABEL>N   hscroll:LABEL>N
 They mirror the flow file's actions one-for-one, so learning either
 teaches the other.
 
 Actions reference a pixelcoords session by label, never by coordinate.
 Exit codes: 0 done, 1 a step failed honestly, 2 malformed question,
-3 refused (permission missing, unsupported platform).";
+3 refused (no --yes, kill switch tripped, permission missing,
+unsupported platform).";
 
 /// Execute desktop interactions from pixelcoords sessions.
 #[derive(Debug, Parser)]
@@ -135,5 +139,37 @@ mod tests {
     fn cli_definition_is_consistent() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    /// The help listed eleven verbs while the parser accepted twelve --
+    /// `changed` was missing, which is the strongest post-action check the
+    /// tool has and the one nobody would guess at.
+    ///
+    /// The list is checked against the *parser's own* error message rather
+    /// than a second list written here, so the authority is the code that
+    /// does the parsing. Same shape as the guard on the line protocol's
+    /// advertised verbs, and for the same reason: a surface that lists what
+    /// it accepts has to list all of it.
+    #[test]
+    fn the_help_lists_every_verb_the_parser_accepts() {
+        let complaint = pixelactions_core::verb::VerbError::Unknown("x".into()).to_string();
+        let listed = complaint
+            .split("expected ")
+            .nth(1)
+            .expect("the error names the verbs");
+
+        let verbs: Vec<&str> = listed
+            .split(&[',', ' '][..])
+            .map(str::trim)
+            .filter(|word| !word.is_empty() && *word != "or")
+            .collect();
+        assert!(verbs.len() >= 12, "parsed too few verbs: {verbs:?}");
+
+        for verb in verbs {
+            assert!(
+                EXAMPLES.contains(verb),
+                "the parser accepts {verb:?} and the help does not mention it"
+            );
+        }
     }
 }
