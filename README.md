@@ -58,29 +58,20 @@ application reacting to one.
 
 ## Install
 
-**macOS, with Homebrew** — this pulls pixelcoords with it, so the pairing
-cannot drift:
+| | |
+|---|---|
+| **macOS** | `brew tap nolindnaidoo/tap && brew install pixelactions` |
+| **Windows** | `winget install nolindnaidoo.pixelactions` |
+| **Anywhere with Rust 1.88+** | `cargo install pixelcoords pixelactions` |
+| **No toolchain** | prebuilt binaries on the [releases page](https://github.com/nolindnaidoo/pixelactions/releases) |
+| **From Python** | `pip install pixelactions` — a client for the line protocol, [docs](https://github.com/nolindnaidoo/pixelactions/tree/main/clients/python) |
 
-```bash
-brew tap nolindnaidoo/tap
-brew install pixelactions
-```
+**It needs pixelcoords**, which it calls for capture-time work. Homebrew
+installs it for you; the other routes do not, so install both. `pixelactions
+doctor` reports whether the pair is workable before you rely on it.
 
-Prebuilt binaries for macOS (arm64 and x86_64), Linux (x86_64) and
-Windows (x86_64) are on the
-[releases page](https://github.com/nolindnaidoo/pixelactions/releases)
-— download, unpack, run. Or build it with cargo:
-
-```bash
-cargo install pixelactions
-```
-
-Rust 1.88+ for the cargo route. pixelactions drives the pixelcoords
-binary for capture-time work — install both:
-
-```bash
-cargo install pixelcoords pixelactions
-```
+The Python package is a *client*, not a replacement — it drives the same
+binary over the line protocol, so it needs the binary too.
 
 Building on Linux needs the xkbcommon headers, because typing on Wayland
 means looking a character up in the compositor's own keymap:
