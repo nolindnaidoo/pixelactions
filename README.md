@@ -58,6 +58,14 @@ application reacting to one.
 
 ## Install
 
+**macOS, with Homebrew** — this pulls pixelcoords with it, so the pairing
+cannot drift:
+
+```bash
+brew tap nolindnaidoo/tap
+brew install pixelactions
+```
+
 Prebuilt binaries for macOS (arm64 and x86_64), Linux (x86_64) and
 Windows (x86_64) are on the
 [releases page](https://github.com/nolindnaidoo/pixelactions/releases)
