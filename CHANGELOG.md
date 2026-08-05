@@ -18,6 +18,25 @@ Every 0.9.x entry below is a fix, and every one was found the same way: by
 asking automation to check something nobody had asked it to check before.
 That is the point of the series.
 
+## 0.9.5 — 2026-08-04
+
+**The help listed eleven verbs and the parser accepted twelve.**
+
+`changed` was missing — the strongest post-action check the tool has, and
+the one nobody would guess at. This is the same fault 0.9.1 fixed in the
+line protocol, in the other surface that lists what it accepts: `--help`
+is the CLI's version of the handshake, and it was short by one.
+
+The list is checked against the parser's own error message now rather than
+a second list written by hand, so the authority is the code that does the
+parsing.
+
+While there: every verb shows its argument, so `type:TEXT` and
+`scroll:LABEL>N` are visible without trying one and reading the error. And
+exit 3's causes were listed as "permission missing, unsupported platform",
+omitting the two anyone actually hits — **no `--yes`**, and the kill
+switch.
+
 ## 0.9.4 — 2026-08-04
 
 **`serve` returned 3 for a session it could not read.**
