@@ -123,7 +123,7 @@ assert!(error.to_string().contains("submit"));
 #
 # const EXAMPLE_SESSION: &str = r#"{
 #   "schema": 1,
-#   "app": { "name": "pixelcoords", "version": "0.2.1" },
+#   "app": { "name": "pixelcoords", "version": "0.7.6" },
 #   "created_utc": "2026-07-29T00:00:00Z",
 #   "monitors": [
 #     { "index": 0, "name": "Built-in", "primary": true,
