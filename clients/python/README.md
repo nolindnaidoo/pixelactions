@@ -95,4 +95,21 @@ No FFI, no native module, **no dependencies**.
 The version tracks the binary it drives. There is no separate client
 version to reason about.
 
+## Releasing
+
+Manual, like the crates — PyPI will not let a version be replaced, only
+yanked, so it is a button someone presses rather than a side effect of a
+tag.
+
+Run the **Publish the Python client** workflow from the Actions tab. It
+defaults to TestPyPI; choose `pypi` for the real thing. The version comes
+from `pyproject.toml`, which a test holds equal to the workspace — there
+is no version input to get wrong.
+
+Publishing uses [Trusted
+Publishing](https://docs.pypi.org/trusted-publishers/), so there is no API
+token stored anywhere. One-time setup on PyPI: add a publisher for
+`nolindnaidoo/pixelactions`, workflow `publish-python.yml`, environment
+`pypi`.
+
 MIT.
