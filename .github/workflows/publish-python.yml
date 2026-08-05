@@ -1,0 +1,59 @@
+name: Publish the Python client
+
+# Manual, like the crates. Publishing is irreversible -- PyPI will not let a
+# version be replaced, only yanked -- so it is a button someone presses
+# after a release, not a side effect of tagging one.
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Where to publish
+        type: choice
+        default: testpypi
+        options: [testpypi, pypi]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    # Matches the target, so the trusted-publisher config on each side
+    # uses the same name as the place it publishes to.
+    environment: ${{ inputs.repository }}
+    permissions:
+      # Trusted Publishing: PyPI verifies this workflow's OIDC identity
+      # instead of a stored API token. Nothing to leak, nothing to rotate.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      # The version is not an input on purpose: it comes from pyproject.toml,
+      # which a test already holds equal to the workspace. Letting a human
+      # type it here would be a second place for it to be wrong.
+      - name: The version matches the workspace
+        working-directory: clients/python
+        run: |
+          python3 -c "
+          import sys; sys.path.insert(0, 'tests')
+          import test_version; test_version.test_client_version_matches_the_workspace()
+          print('version matches the workspace')"
+
+      - name: The suite
+        working-directory: clients/python
+        run: python3 tests/test_session.py
+
+      - name: Build
+        working-directory: clients/python
+        run: |
+          python3 -m pip install --quiet build
+          python3 -m build
+          ls -l dist/
+
+      - uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
+        with:
+          packages-dir: clients/python/dist
+          repository-url: ${{ inputs.repository == 'pypi' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
