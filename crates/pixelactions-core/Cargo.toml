@@ -22,7 +22,7 @@ categories = ["development-tools", "development-tools::testing"]
 # The session schema, from the sister tool's published crate — a caret
 # range, never a path dependency, so pixelcoords evolves on its own
 # schedule and this crate upgrades deliberately. See AGENTS.md.
-pixelcoords-core = "0.7.6"
+pixelcoords-core = "0.7.7"
 serde = { version = "1", features = ["derive"] }
 # The line protocol is JSON on stdin/stdout — the one wire format every
 # language already has. See protocol.rs.

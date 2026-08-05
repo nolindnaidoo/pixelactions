@@ -18,7 +18,7 @@ use crate::session::SUPPORTED_SCHEMA;
 /// match score on a low-detail region to push a perfect match under the
 /// floor. The result is a loop that fails intermittently and blames the
 /// screen. Refusing an old pixelcoords is cheaper than debugging that.
-pub const MIN_PIXELCOORDS: &str = "0.7.6";
+pub const MIN_PIXELCOORDS: &str = "0.7.7";
 
 /// Split `0.1.2` into comparable numbers. Anything that is not three
 /// dotted integers is unreadable rather than assumed good.
@@ -890,15 +890,15 @@ mod tests {
     #[test]
     fn newer_and_equal_versions_are_accepted() {
         assert!(meets_minimum(MIN_PIXELCOORDS));
-        assert!(meets_minimum("0.7.7"));
+        assert!(meets_minimum("0.7.8"));
         assert!(meets_minimum("0.8.0"));
         assert!(meets_minimum("1.0.0"));
         // A pre-release of the minimum still carries the fix.
-        assert!(meets_minimum("0.7.6-rc1"));
+        assert!(meets_minimum("0.7.7-rc1"));
     }
 
     /// The versions refused here are the ones that were *accepted* before
-    /// the minimum moved to 0.7.6.
+    /// the minimum moved to 0.7.7.
     ///
     /// The 0.7.x entries are the interesting ones: `resolve`, `wait` and
     /// `diff` all exist in them, so the pairing runs — it just runs against
@@ -907,7 +907,7 @@ mod tests {
     /// patch and says so rather than blessing a pairing it has not tested.
     #[test]
     fn older_versions_are_refused() {
-        assert!(!meets_minimum("0.7.5"));
+        assert!(!meets_minimum("0.7.6"));
         assert!(!meets_minimum("0.7.0"));
         assert!(!meets_minimum("0.6.0"));
         assert!(!meets_minimum("0.5.3"));
