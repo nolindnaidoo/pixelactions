@@ -79,7 +79,7 @@ xkbcommon = { version = "0.9", features = ["wayland"] }
 # - Security + System_Threading: the process elevation bit `doctor` reports,
 #   which is the whole UIPI story in one answer.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Threading",
