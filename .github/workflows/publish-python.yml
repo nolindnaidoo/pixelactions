@@ -53,7 +53,11 @@ jobs:
           python3 -m build
           ls -l dist/
 
-      - uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
+      # The *commit* the tag points at, not the annotated tag object's own
+      # SHA. This action runs as a container whose image is tagged by
+      # commit, so a tag-object SHA resolves to an image that does not
+      # exist -- `manifest unknown`, after the build has already run.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: clients/python/dist
           repository-url: ${{ inputs.repository == 'pypi' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
