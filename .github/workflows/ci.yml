@@ -201,6 +201,37 @@ jobs:
           chmod +x /tmp/scenarios.sh
           xvfb-run -a --server-args="-screen 0 1280x1024x24" bash /tmp/scenarios.sh
 
+  # The Python client is a separate product on a separate version line's
+  # worth of tooling, but it speaks this repo's protocol -- so it is tested
+  # here, where a protocol change and its client move together.
+  #
+  # Path-filtered: a Rust-only change should not pay for a Python run, and
+  # a Python-only change should not wait on four platforms of cargo.
+  python-client:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.9"
+      # No dependencies to install, deliberately: the client is standard
+      # library only, and the suite runs against a fake server on the same
+      # wire rather than the real binary, so it needs no display either.
+      - name: The suite
+        working-directory: clients/python
+        run: |
+          python3 tests/test_session.py
+          python3 -c "
+          import sys; sys.path.insert(0, 'tests')
+          import test_version; test_version.test_client_version_matches_the_workspace()
+          print('version matches the workspace')"
+      - name: It builds a wheel
+        working-directory: clients/python
+        run: |
+          python3 -m pip install --quiet build
+          python3 -m build --wheel
+          ls -l dist/
+
   msrv:
     runs-on: macos-15
     steps:
