@@ -15,13 +15,25 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+/// Internal: key-chord parsing for input synthesis. Public only because the binary is a
+/// separate crate; not part of this crate's API.
+#[doc(hidden)]
 pub mod chord;
 pub mod convert;
+/// Internal: which display server this session runs on. Public only because the binary is a
+/// separate crate; not part of this crate's API.
+#[doc(hidden)]
 pub mod display;
 pub mod flow;
 pub mod plan;
 pub mod protocol;
 pub mod report;
+/// Internal: Wayland screencast coordinate space. Public only because the binary is a
+/// separate crate; not part of this crate's API.
+#[doc(hidden)]
 pub mod stream;
 pub mod verb;
+/// Internal: Windows virtual-desktop normalization. Public only because the binary is a
+/// separate crate; not part of this crate's API.
+#[doc(hidden)]
 pub mod virtualdesk;
