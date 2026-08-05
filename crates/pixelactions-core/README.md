@@ -296,6 +296,13 @@ malformed question · **3** refused.
 Full API, every item:
 **[docs.rs/pixelactions-core](https://docs.rs/pixelactions-core)**
 
+Some modules are `pub` and **not** part of this API — key-chord parsing,
+display-server detection, the Wayland screencast space and the Windows
+virtual-desktop grid. They are public only because the binary is a
+separate crate and can reach nothing else. They carry `#[doc(hidden)]`,
+do not appear on docs.rs, and are not covered by this crate's
+versioning.
+
 ## Testing
 
 | Layer | What it covers |
