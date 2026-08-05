@@ -844,9 +844,9 @@ dependencies = [
 
 [[package]]
 name = "pixelcoords-core"
-version = "0.7.0"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41e9e68ba56f01204fc226020c2d6efe3800b2bf5f1278a6a2fb84cd20623008"
+checksum = "2e6ad493e322c6b66ff10437c968822bba25d19f5f647ef89cee59de32b8e04d"
 dependencies = [
  "fontdue",
  "serde",

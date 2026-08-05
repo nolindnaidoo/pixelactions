@@ -18,7 +18,7 @@ use crate::session::SUPPORTED_SCHEMA;
 /// match score on a low-detail region to push a perfect match under the
 /// floor. The result is a loop that fails intermittently and blames the
 /// screen. Refusing an old pixelcoords is cheaper than debugging that.
-pub const MIN_PIXELCOORDS: &str = "0.7.0";
+pub const MIN_PIXELCOORDS: &str = "0.7.6";
 
 /// Split `0.1.2` into comparable numbers. Anything that is not three
 /// dotted integers is unreadable rather than assumed good.
@@ -857,22 +857,58 @@ mod tests {
         assert!(parts(MIN_PIXELCOORDS).is_some(), "{MIN_PIXELCOORDS}");
     }
 
+    /// CI downloads a pinned pixelcoords to run the scenarios against, and
+    /// that pin has to be a version this build will accept.
+    ///
+    /// Raising the floor without moving the workflow makes every
+    /// display-dependent job fail at once with "0.7.0 is too old" -- which
+    /// is the floor working, but it costs a full CI round to find out.
+    /// Cheaper to fail here, in milliseconds.
+    #[test]
+    fn ci_installs_a_pixelcoords_this_build_accepts() {
+        const WORKFLOW: &str = include_str!("../../../.github/workflows/ci.yml");
+
+        let pinned: Vec<&str> = WORKFLOW
+            .split("pixelcoords/releases/download/v")
+            .skip(1)
+            .filter_map(|rest| rest.split(['/', '\n', ' ']).next())
+            .collect();
+        assert!(
+            !pinned.is_empty(),
+            "the workflow no longer downloads pixelcoords -- update this test"
+        );
+
+        for version in pinned {
+            assert!(
+                meets_minimum(version),
+                "CI installs pixelcoords {version}, which this build refuses \
+                 (minimum {MIN_PIXELCOORDS})"
+            );
+        }
+    }
+
     #[test]
     fn newer_and_equal_versions_are_accepted() {
         assert!(meets_minimum(MIN_PIXELCOORDS));
-        assert!(meets_minimum("0.7.1"));
+        assert!(meets_minimum("0.7.7"));
         assert!(meets_minimum("0.8.0"));
         assert!(meets_minimum("1.0.0"));
         // A pre-release of the minimum still carries the fix.
-        assert!(meets_minimum("0.7.0-rc1"));
+        assert!(meets_minimum("0.7.6-rc1"));
     }
 
     /// The versions refused here are the ones that were *accepted* before
-    /// the minimum moved to 0.7.0. `resolve`, `wait` and `diff` do not
-    /// exist in any of them, so blessing one would bless a pairing that
-    /// cannot work.
+    /// the minimum moved to 0.7.6.
+    ///
+    /// The 0.7.x entries are the interesting ones: `resolve`, `wait` and
+    /// `diff` all exist in them, so the pairing runs — it just runs against
+    /// a `resolve` that answers for regions with no interior instead of
+    /// refusing them, which 0.7.3 fixed. This project supports the latest
+    /// patch and says so rather than blessing a pairing it has not tested.
     #[test]
     fn older_versions_are_refused() {
+        assert!(!meets_minimum("0.7.5"));
+        assert!(!meets_minimum("0.7.0"));
         assert!(!meets_minimum("0.6.0"));
         assert!(!meets_minimum("0.5.3"));
         assert!(!meets_minimum("0.1.2"));
