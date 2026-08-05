@@ -18,7 +18,29 @@ Every 0.9.x entry below is a fix, and every one was found the same way: by
 asking automation to check something nobody had asked it to check before.
 That is the point of the series.
 
-## 0.9.5 — 2026-08-04
+## 0.9.6 — 2026-08-05
+
+**Everything 0.9.5 was, plus the pin that made it honest.**
+
+0.9.5 was tagged, built, and pulled before it reached crates.io. Its
+release binaries were compiled `--locked` against `pixelcoords-core`
+**0.7.0** while a fresh `cargo install` resolved **0.7.6** — the same
+version number behaving two ways depending on where you got it. GitHub
+reserves a tag once it has carried a release, so the fix ships as 0.9.6
+rather than a corrected 0.9.5.
+
+- `pixelcoords-core` is now required at **`"0.7.6"`** in both crates
+  (caret — 0.7.6 or newer below 0.8), and the lockfile moved with it.
+- `MIN_PIXELCOORDS` is **0.7.6**, so the runtime check on the sister
+  binary matches the crate requirement. This project supports the latest
+  patch rather than blessing a pairing it has not tested.
+- CI's pinned pixelcoords moved too, and a test now reads the version out
+  of `ci.yml` and refuses one this build would reject — raising the floor
+  without moving the workflow failed every display job at once, which is
+  the floor working but an expensive way to learn it.
+
+### And the fixes 0.9.5 carried
+
 
 **The help listed eleven verbs and the parser accepted twelve.**
 
