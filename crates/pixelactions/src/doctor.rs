@@ -857,6 +857,36 @@ mod tests {
         assert!(parts(MIN_PIXELCOORDS).is_some(), "{MIN_PIXELCOORDS}");
     }
 
+    /// CI downloads a pinned pixelcoords to run the scenarios against, and
+    /// that pin has to be a version this build will accept.
+    ///
+    /// Raising the floor without moving the workflow makes every
+    /// display-dependent job fail at once with "0.7.0 is too old" -- which
+    /// is the floor working, but it costs a full CI round to find out.
+    /// Cheaper to fail here, in milliseconds.
+    #[test]
+    fn ci_installs_a_pixelcoords_this_build_accepts() {
+        const WORKFLOW: &str = include_str!("../../../.github/workflows/ci.yml");
+
+        let pinned: Vec<&str> = WORKFLOW
+            .split("pixelcoords/releases/download/v")
+            .skip(1)
+            .filter_map(|rest| rest.split(['/', '\n', ' ']).next())
+            .collect();
+        assert!(
+            !pinned.is_empty(),
+            "the workflow no longer downloads pixelcoords -- update this test"
+        );
+
+        for version in pinned {
+            assert!(
+                meets_minimum(version),
+                "CI installs pixelcoords {version}, which this build refuses \
+                 (minimum {MIN_PIXELCOORDS})"
+            );
+        }
+    }
+
     #[test]
     fn newer_and_equal_versions_are_accepted() {
         assert!(meets_minimum(MIN_PIXELCOORDS));
