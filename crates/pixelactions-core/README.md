@@ -1,41 +1,30 @@
 # pixelactions-core
 
-The platform-free core of
-[pixelactions](https://github.com/nolindnaidoo/pixelactions): coordinate-space
-conversion, the flow-file schema, label resolution, the line protocol's
-wire types, and the run-report format — with no input synthesis, no OS
-calls, and `#![forbid(unsafe_code)]`.
+<p align="center">
+  <a href="https://crates.io/crates/pixelactions-core"><img src="https://img.shields.io/crates/v/pixelactions-core.svg" alt="crates.io" /></a>
+  <a href="https://docs.rs/pixelactions-core"><img src="https://img.shields.io/docsrs/pixelactions-core.svg" alt="docs.rs" /></a>
+  <img src="https://img.shields.io/badge/rustc-1.88+-93450a.svg" alt="MSRV: Rust 1.88+" />
+  <img src="https://img.shields.io/badge/unsafe-forbidden-success.svg" alt="forbid(unsafe_code)" />
+  <a href="https://github.com/nolindnaidoo/pixelactions/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+</p>
 
-**Want the tool?** Install the binary: `cargo install pixelactions`.
-**Want to build your own executor, client, or planner?** That's this
-crate.
+A coordinate is only worth having if something acts on it. pixelactions is
+the second half of that loop: it reads a session a human marked in
+[pixelcoords](https://github.com/nolindnaidoo/pixelcoords), resolves the
+label to a point, performs the interaction, and confirms it landed.
+
+This is its platform-free core: coordinate conversion, flow files, the
+planner, the line protocol, the step vocabulary, and the run report — with
+no input backend, no OS calls, and `#![forbid(unsafe_code)]`.
+
+**Want the tool?** `cargo install pixelactions`.
+**Want to build on it?** This crate — it is what you use to *generate*
+flows, *parse* reports, or drive the protocol from Rust.
 
 ```toml
 [dependencies]
 pixelactions-core = "0.9"
 ```
-
-## What you'd use it for
-
-[pixelcoords](https://crates.io/crates/pixelcoords) answers *where is
-this thing*. pixelactions answers *act on it, then confirm it landed*.
-This crate is the half of that with no platform in it — which turns out
-to be the half that is easy to get wrong.
-
-Build on it when you want to:
-
-- **convert a saved coordinate into whatever your input API expects** —
-  the single most valuable thing here, and the thing most tools get
-  wrong
-- write your own executor over a different input backend (a VM, a remote
-  desktop, a robot arm) while keeping the same flow files
-- write a Rust client for the `serve` line protocol, or an alternative
-  server that speaks it
-- parse and validate flow files or chained-argv verbs in your own tooling
-
-The binary is deliberately thin on top of this. Everything it decides
-about *where to act* lives here, where it can be unit-tested without a
-screen.
 
 ## Coordinate spaces: the reason this crate exists
 
@@ -104,52 +93,6 @@ assert!(matches!(native_space(), Space::Logical | Space::Physical));
 corner stops a run, because grabbing the mouse is what a person does
 when automation goes wrong.
 
-## Flow files
-
-A flow references regions by **label**, never by raw coordinate. That
-indirection is the point: a label survives the UI moving, and a diff
-shows intent ("click submit") rather than arithmetic.
-
-```rust
-use pixelactions_core::flow::{Flow, Step, Verify};
-
-# fn main() -> Result<(), Box<dyn std::error::Error>> {
-let flow = Flow::parse(
-    r#"
-    session = "~/captures/checkout"
-
-    [settings]
-    verify = "each"
-    timeout_ms = 30000
-
-    [[step]]
-    action = "click"
-    target = "email"
-
-    [[step]]
-    action = "type"
-    text = "a@b.com"
-
-    [[step]]
-    action = "wait_for"
-    target = "confirmation"
-    "#,
-)?;
-
-assert_eq!(flow.settings.verify, Verify::Each);
-assert_eq!(flow.steps[0], Step::Click { target: "email".into() });
-
-// Every label the flow will touch, for resolving up front.
-assert_eq!(flow.targets(), vec!["email", "confirmation"]);
-# Ok(())
-# }
-```
-
-Parsing is **strict**: unknown keys are errors, not silent no-ops, so a
-typo fails at parse time instead of skipping a step at run time. (Session
-parsing, by contrast, is deliberately tolerant — unknown fields from a
-newer pixelcoords are ignored, so the two tools release independently.)
-
 ## Resolving labels to points
 
 `plan` turns a flow plus a session into concrete coordinates, or refuses.
@@ -195,6 +138,52 @@ assert!(error.to_string().contains("submit"));
 #   ]
 # }"#;
 ```
+
+## Flow files
+
+A flow references regions by **label**, never by raw coordinate. That
+indirection is the point: a label survives the UI moving, and a diff
+shows intent ("click submit") rather than arithmetic.
+
+```rust
+use pixelactions_core::flow::{Flow, Step, Verify};
+
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+let flow = Flow::parse(
+    r#"
+    session = "~/captures/checkout"
+
+    [settings]
+    verify = "each"
+    timeout_ms = 30000
+
+    [[step]]
+    action = "click"
+    target = "email"
+
+    [[step]]
+    action = "type"
+    text = "a@b.com"
+
+    [[step]]
+    action = "wait_for"
+    target = "confirmation"
+    "#,
+)?;
+
+assert_eq!(flow.settings.verify, Verify::Each);
+assert_eq!(flow.steps[0], Step::Click { target: "email".into() });
+
+// Every label the flow will touch, for resolving up front.
+assert_eq!(flow.targets(), vec!["email", "confirmation"]);
+# Ok(())
+# }
+```
+
+Parsing is **strict**: unknown keys are errors, not silent no-ops, so a
+typo fails at parse time instead of skipping a step at run time. (Session
+parsing, by contrast, is deliberately tolerant — unknown fields from a
+newer pixelcoords are ignored, so the two tools release independently.)
 
 ## The same verbs, three ways
 
@@ -292,46 +281,64 @@ assert_eq!(refused.exit_code(), 3);
 Exit codes are the API: **0** done · **1** a step failed honestly · **2**
 malformed question · **3** refused.
 
-## The modules
+## Modules
 
-| Module | What it is |
+| Module | What it owns |
 |---|---|
-| `convert` | coordinate spaces, per-monitor scaling, screen corners |
-| `flow` | the flow-file schema and its steps, parsed strictly |
-| `plan` | resolving labels against a session, totally or not at all |
-| `verb` | the chained-argv `verb:argument` grammar |
-| `protocol` | the `serve` line protocol, both directions |
-| `report` | run reports, step outcomes, the exit-code contract |
-| `chord` | reading `cmd+shift+s` into modifiers and a key |
+| `flow` | the flow file: steps, settings, parsing — strict, unknown keys refused |
+| `verb` | the chained-argv grammar (`click:submit`, `scroll:list>3`) |
+| `plan` | resolving labels to points, and refusing when it cannot |
+| `convert` | physical ↔ logical, and which one this platform's input API wants |
+| `protocol` | the line protocol: requests, responses, the advertised verbs |
+| `report` | the run report — what executed, what verified, what failed |
+| `audit` | the append-only record of what a run did |
 
-## Relationship to pixelcoords-core
+Full API, every item:
+**[docs.rs/pixelactions-core](https://docs.rs/pixelactions-core)**
 
-This crate depends on
-[pixelcoords-core](https://crates.io/crates/pixelcoords-core) for the
-session schema, and the dependency is **one-way and forever** — the two
-tools release independently and neither is pinned to the other's
-schedule. Sessions are read through pixelcoords' own types, which ignore
-unknown fields, so every additive schema change upstream is a no-op here.
-Our own config is parsed strictly: tolerance is for other people's data,
-not ours.
+## Testing
 
-**Stability, honestly.** This is pre-1.0 and shares a version with the
-binary, so a minor bump can change any signature. The **flow file, the
-line protocol, and the exit codes are the parts with a real
-compatibility promise** — the protocol carries `PROTOCOL_VERSION` and a
-handshake precisely so it can change without breaking your program. Pin
-a caret range and read the
-[CHANGELOG](https://github.com/nolindnaidoo/pixelactions/blob/main/CHANGELOG.md)
-before upgrading.
+| Layer | What it covers |
+|---|---|
+| Unit tests | every module — **90% line coverage floor per module**, enforced in CI |
+| Property tests | the conversion, because a bug there means clicking the wrong place |
+| Doctests | every example in this file compiles and runs — the README *is* the crate docs |
 
-Every example above is compiled and run as a doctest in CI, so nothing on
-this page can rot silently.
+Examples here are `include_str!`'d into the crate and run on every push, so
+one that stopped compiling would fail CI rather than mislead you.
 
-## See also
+## Relationship to the other crates
 
-- [pixelcoords](https://crates.io/crates/pixelcoords) — the other half: mark regions, get pixel-exact coordinates
-- [docs/FLOW.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/FLOW.md) — every step and setting
-- [docs/PROTOCOL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md) — the line protocol, with a working client
-- [API docs](https://docs.rs/pixelactions-core) · [repository](https://github.com/nolindnaidoo/pixelactions) · [pixelactions.dev](https://pixelactions.dev)
+`pixelactions` the binary is this crate plus an input backend: `CGEvent`,
+`SendInput`, XTEST, or the Wayland portal. Anything decidable without
+touching a device lives here.
 
-MIT licensed.
+`pixelcoords-core` owns the geometry and the session schema; this crate
+depends on it and **never reimplements it**. Matching, capture and shapes
+belong there. What belongs here is everything about *acting*: the space a
+platform's input API expects, the vocabulary of steps, and the report.
+
+## Also by nolindnaidoo
+
+**Rust**
+
+- **[pixelcoords](https://github.com/nolindnaidoo/pixelcoords)** - Mark pixel-exact coordinates machines can use · [pixelcoords.dev](https://pixelcoords.dev)
+
+**VS Code Extensions** — every tool in the family, one page: **[letools.dev](https://letools.dev)**
+
+- **[String-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.string-le)** - Extract string values for i18n from JSON, YAML, CSV, TOML, INI, and .env
+- **[Numbers-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.numbers-le)** - Extract numeric values from JSON, YAML, CSV, TOML, INI, and .env
+- **[EnvSync-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.envsync-le)** - Spot missing keys across your .env files, with a markdown report
+- **[Paths-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.paths-le)** - Extract file paths from JS/TS imports, JSON, HTML, CSS, TOML, CSV, and .env
+- **[Secrets-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.secrets-le)** - Detect and sanitize credentials locally, before you commit
+- **[Scrape-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.scrape-le)** - Check whether a page is scrapeable before you write the scraper
+- **[Colors-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.colors-le)** - Extract and analyze colors from CSS, SCSS, LESS, Stylus, HTML, JS/TS, and SVG
+- **[URLs-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.urls-le)** - Extract URLs from documentation, configs, and code
+- **[Regex-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.regex-le)** - Find, test, and validate the regex patterns in the current file
+- **[Dates-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.dates-le)** - Extract and analyze dates from logs, configs, and code
+
+**Contact Developer** — [GitHub](https://github.com/nolindnaidoo) · [LinkedIn](https://www.linkedin.com/in/nolindnaidoo/)
+
+## License
+
+MIT — see [LICENSE](https://github.com/nolindnaidoo/pixelactions/blob/main/LICENSE).

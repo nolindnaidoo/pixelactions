@@ -42,12 +42,19 @@ No account, no network surface, no daemon — one small native binary that
 runs, acts, and exits. MIT-licensed, because the aim was to build the
 best executor in this category and give it away.
 
-## Status
+> **Useful?** A star is how other developers find it —
+> [★ GitHub](https://github.com/nolindnaidoo/pixelactions) ·
+> [pixelactions.dev](https://pixelactions.dev)
 
-**Early.** The loop works end to end on **macOS**, **Windows**, and
-**Linux** — both X11 and Wayland (GNOME and KDE): resolve a label to its
-click point, re-locate it against a fresh capture, act, and confirm. That
-is every platform this tool set out to cover.
+A coordinate is only worth having if something acts on it. pixelactions is
+the second half of that loop: it reads a session a human marked in
+[pixelcoords](https://github.com/nolindnaidoo/pixelcoords), resolves the
+label to a point, performs the interaction, and **confirms it landed**.
+
+Actions name regions by label, never by coordinate. Nothing is injected
+without `--yes`. Every step reports whether it *executed* or was
+*verified* — because an OS accepting a click is not the same as the
+application reacting to one.
 
 ## Install
 
@@ -99,202 +106,118 @@ refusal.
 Which of the two Linux paths you get is decided from the session at
 runtime, not at build time; `doctor` names it.
 
+## Sixty seconds
+
+```bash
+pixelcoords --out ./login            # mark the fields once, by hand
+pixelactions plan --session ./login click:user   # see the coordinate, touch nothing
+pixelactions run --session ./login \
+  click:user type:"me@example.com" key:tab type:"hunter2" click:submit \
+  wait:dashboard --yes
+```
+
+`plan` first is the habit worth forming: it prints every coordinate after
+conversion, with the monitor it landed on, and moves nothing.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `plan` | Resolve a flow and print what would happen. Touches nothing |
+| `run` | Perform it — a flow file, or verbs chained on the command line. Needs `--yes` |
+| `serve` | Speak the line protocol on stdin/stdout, so any language can drive it |
+| `mcp` | Serve the executor over MCP, so a model can drive it |
+| `doctor` | OS support, input permission, displays, and the pixelcoords it calls |
+
+## Verbs
+
+The same twelve everywhere — chained on the command line, in a flow file,
+over the protocol, or as MCP steps:
+
+| Verb | Form | What it does |
+|---|---|---|
+| `click` `double` | `click:LABEL` | Click, or double-click, the region's point |
+| `type` | `type:TEXT` | Type text, including characters not on the layout |
+| `key` | `key:CHORD` | A chord like `cmd+s` — arriving as keys, not characters |
+| `drag` | `drag:FROM>TO` | Press at one region, release at another |
+| `scroll` `hscroll` | `scroll:LABEL>N` | Wheel over a region; negative reverses |
+| `verify` | `verify:LABEL` | Is the region still what it was? |
+| `wait` `gone` | `wait:LABEL` | Block until it matches, or until it disappears |
+| `changed` | `changed:LABEL` | Did this region change? The strongest post-action check |
+| `pause` | `pause:MS` | Wait a fixed time, when there is genuinely no observable |
+
+Full reference:
+**[docs/CLI.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/CLI.md)**
+· flow files:
+**[docs/FLOW.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/FLOW.md)**
+
 ## Three ways to drive it
 
-One binary, three surfaces, ranked. **Most people want the first.** Here
-is the same task in each — fill a field and confirm the result.
+| | For | Start at |
+|---|---|---|
+| **Flow file** | a repeatable script you commit | [docs/FLOW.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/FLOW.md) |
+| **Line protocol** | your own program, in any language, owning the loop | [docs/PROTOCOL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md) |
+| **MCP** | a model driving it, with acting gated behind `--yes` | `pixelactions mcp --help` |
 
-### 1. Command line
+All three run the same planner and executor. A verb behaves identically
+whichever way you reach it.
 
-```bash
-pixelactions run --session ~/captures/checkout \
-  click:email type:"a@b.com" key:enter verify:success --yes
-```
+## Things worth knowing early
 
-Nothing to install, nothing to keep in sync. Verbs chain in one
-invocation, which also means **one** relocation pass for the whole
-sequence.
+**Nothing moves without `--yes`.** `run` without it prints what it would
+do and exits 3. This is the safety property everything else rests on.
 
-### 2. A flow file
+**The kill switch.** Park the pointer in a screen corner and the run stops
+before its next step. It works on macOS, Windows and X11. **On Wayland it
+cannot** — the protocol will not report the pointer position — so a flow
+there must set `failsafe = false` deliberately and in writing, or every
+step refuses.
 
-```toml
-session = "~/captures/checkout"
+**Exit codes are the API:**
 
-[[step]]
-action = "click"
-target = "email"
+| Code | Meaning |
+|---|---|
+| 0 | every step executed, and verified where asked |
+| 1 | a step failed honestly — target missing, verification failed, timeout |
+| 2 | the question was malformed — bad flow, unknown label |
+| 3 | refused — no `--yes`, kill switch, permission missing, unsupported platform |
 
-[[step]]
-action = "type"
-text = "a@b.com"
+**Executed is not verified.** The OS accepting an event says nothing about
+the application reacting. Ask for `verify` or `changed` when it matters.
 
-[[step]]
-action = "key"
-chord = "enter"
+**One label, one region.** If two selections share a label the run refuses
+rather than clicking whichever came first.
 
-[[step]]
-action = "verify"
-target = "success"
-```
+## Platform support
 
-```bash
-pixelactions plan --flow checkout.toml       # every coordinate, acts on nothing
-pixelactions run  --flow checkout.toml --yes
-```
+| Platform | Input path | Permission | Kill switch |
+|---|---|---|---|
+| macOS | CGEvent, logical points | Accessibility, granted to the launching terminal | Yes |
+| Windows 11 | `SendInput`, whole virtual desktop | none — but **UIPI** blocks elevated targets | Yes |
+| Linux (X11) | XTEST, root-window pixels | none — X11 has no permission model | Yes |
+| Linux (Wayland) | portal + EIS | screen share, remembered after the first | **No — by protocol** |
 
-Same verbs as the command line. Reviewable in a diff — a pull request
-shows *click submit*, not arithmetic.
+Verified by running the loop on real hardware, not by reading docs.
+Multi-monitor and mixed-DPI on Windows remain unrun; the open *Hand-verify*
+issues carry the checklists and
+[CONTRIBUTING.md](https://github.com/nolindnaidoo/pixelactions/blob/main/CONTRIBUTING.md)
+the record.
 
-### 3. The line protocol
+## Testing
 
-```python
-ui.send(do="click", target="email")
-ui.send(do="type", text=row["email"])
-ui.send(do="key", chord="enter")
-if ui.send(do="verify", target="success")["outcome"] != "verified":
-    failures.append(row)
-```
+| Layer | What it covers |
+|---|---|
+| Unit + property tests | `pixelactions-core`, **90% line coverage floor per module** |
+| Scenario tests | the binary driven against a **real display** on macOS, Windows and Linux every push — everything except input synthesis |
+| X11 injection | a genuine synthetic event posted to a live X server and **read back** |
+| Manual gates | whether a click reached an *application*, and the permission model — verified by hand, and said so plainly |
 
-```bash
-pixelactions serve --session ~/captures/checkout
-```
+262 tests. CI runs fmt, clippy pedantic (`-D warnings`), the suite, MSRV,
+`cargo audit`, and a policy job that fails on any inline `#[allow]`.
 
-One long-lived process speaking JSON on stdin/stdout, so **a program in
-any language owns the loop** — branching on what's on screen, retrying
-with different data, reading a CSV, calling an API between steps. The
-client above is forty lines of stdlib Python, in
-[docs/PROTOCOL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md).
-
-Escalate on a symptom, not a feature list: one command, then chained
-commands, then the protocol when you need loops, branching, and data.
-
-**There is no embedded interpreter, and never will be.** Your bot is
-written in your language, which is why this works with all of them
-instead of the two we could afford to embed.
-
-## What makes it different
-
-- **It acts where regions are *now*.** Before running, every target is
-  re-located against a fresh capture; a region that moved yields
-  corrected coordinates, so a session captured last month still works.
-- **It refuses rather than guesses.** Every region is re-confirmed
-  immediately *before* the step that touches it, and a region that can't
-  be found unambiguously stops the run with nothing injected. Ambiguity is
-  the test, not distance: a match found in one place is that region
-  however far it moved, which is what lets a flow survive a scrolled page.
-- **It checks before acting, not after.** Acting on something changes it —
-  a focused field grows a caret — so "the region still matches" after a
-  click would mean the click did nothing. Outcomes are asserted by naming
-  what should have changed.
-- **It distinguishes "executed" from "verified".** The OS accepting an
-  event is not the app reacting to one, and the report says which
-  happened.
-- **Waiting is observable, not hopeful.** `wait_for` polls with real
-  captures and returns the instant the condition holds. No sleeps, at
-  any layer, including the protocol.
-- **Grabbing the mouse stops it.** Slam the cursor into a screen corner
-  and the run halts before the next step — the one control that works
-  while the automation holds your keyboard and the terminal is not
-  focused.
-- **Every run leaves a record.** One NDJSON line per event, written as
-  the run goes rather than at the end, so a run the watchdog stopped or
-  someone killed still says what it did first. It carries the coordinates
-  actually sent — not the ones the session saved — and it never contains
-  typed text, because steps are recorded by their summary and a `type`
-  summary is `type 26 chars`. `doctor` prints where it lives.
-- **Exit codes are the API**: 0 done, 1 a step failed, 2 malformed
-  question, 3 refused.
-
-## Platform status
-
-| Platform | State |
-|----------|-------|
-| macOS | Supported — the loop works end to end; primary development platform |
-| Windows | Supported — `SendInput` across the whole virtual desktop, kill switch included. One limit: UIPI — see above |
-| Linux (X11) | Supported — XTEST in root-window pixels, kill switch included |
-| Linux (Wayland) | Supported on GNOME and KDE, via the portal + EIS path. One caveat: no kill switch — see below |
-
-Verified by running the loop, not by reading docs. On Wayland: a region
-marked in pixelcoords on GNOME 46, relocated, clicked, and the
-application reacted — placement exact, a rectangle dragged at (82, 328)
-recorded as (82, 328). On X11: a marked calculator key clicked from an
-unfocused window, then `esc`, `×3` and `enter` producing `7×3 = 21` —
-which also proves off-layout typing, since `×` is on no US layout. On
-Windows 11, a 3440×1440 desktop: placement measured by reading the cursor
-back at (0, 0), mid-screen, and (3439, 1439) — the last pixel, which is
-exactly the one the `65535 ÷ dimension` off-by-one makes unreachable —
-exact at all three; a click landing on a button and the application
-reacting; `ö` and `×` typed on a US layout; `ctrl+a`, `ctrl+shift+k` and
-the arrow keys arriving as chords rather than as characters.
-
-**Which Linux path you get is a runtime answer**, decided from the
-session, because the same binary faces either one. Injecting through
-XWayland on a Wayland session would reach X clients only, so the pointer
-would travel over native windows that never receive the events — a run
-that clicks through some windows and not others while reporting success.
-That is why the choice is made once, from `XDG_SESSION_TYPE` and the
-socket variables, and a session that cannot be named is refused rather
-than guessed at.
-
-**The Wayland caveat, stated plainly.** Wayland exposes no way to ask
-where the pointer is — the same isolation that makes injection require
-your consent also hides the pointer from other programs. So the corner
-kill switch has nothing to watch, and a flow must opt out of it
-deliberately:
-
-```toml
-[settings]
-failsafe = false
-```
-
-Nothing is faked to avoid this. A stubbed cursor position would either
-sit in a screen corner and abort every run, or disable the check while
-appearing to keep it. `doctor` reports whether your compositor could
-supply the pointer position through screencast metadata, which is what
-lifting this needs.
-
-**X11 has no such caveat**, because X11 will tell you where the pointer
-is. The kill switch is armed by default there. What X11 does not have is
-a permission model of any kind: any client may inject into any other, so
-there is nothing to grant, and `doctor` says so rather than implying a
-guard exists.
-
-**Windows has its own limit, and it is the OS's, not this tool's.** UIPI
-means a process at medium integrity cannot send input to an elevated
-window, the UAC dialog, or the login screen. There is no permission that
-lifts it and no workaround here; `doctor` reports whether the process is
-elevated so the answer is a fact about your machine. Placement is measured
-rather than assumed — but on a single-display machine, so **multi-monitor
-and mixed-DPI layouts have not been run on real hardware yet**, only
-unit-tested. Reports from a two-screen desk are the most useful thing
-anyone could send.
-
-**Those runs were 0.2.0 through 0.4.0.** Nine releases have shipped since
-— the pixelcoords seam, `changed`, the audit log, the MCP surface, and
-five rounds of bug fixes — and on Windows, X11 and Wayland none of them
-have been driven by hand. macOS has. This file will say so until someone
-sits at each machine.
-
-Two slices of that are now automatic. `scripts/x11-scenarios.sh` runs in
-CI against a live X server: a marked region is located, a click lands
-where `plan` said, a cursor in a corner refuses the step, and the audit
-log records a refused run. That is a real X server and a real synthetic
-event — on a bare 1280×1024 Xvfb with no window manager, which is not a
-desktop.
-
-Everything the tool does *other* than synthesise input now runs against a
-real display on **macOS, Windows and Linux** every push: planning against
-a session marked from a genuine capture, all twelve verbs, every settings
-key, the exit codes, the refusals, the line protocol, and all three MCP
-tools. What that still cannot answer is whether a click reached an
-application, and whether the permission model let it — which is the part
-that needs a person, and the part the open *Hand-verify* issues cover.
-
-Binaries ship for the platforms that are actually supported — all four
-now. Shipping one for a platform that refuses to inject would imply
-support a build does not have, which is the rule that kept Windows off the
-releases page until this release. This table is kept honest — claims match
-runs.
+There is no performance table here on purpose: the timings that matter
+belong to the matching pixelcoords does, and they are measured
+[there](https://github.com/nolindnaidoo/pixelcoords/blob/main/docs/PERFORMANCE.md).
 
 ## Non-goals
 
@@ -318,29 +241,36 @@ is in [design/05-NON-GOALS.md](https://github.com/nolindnaidoo/pixelactions/blob
 
 ## Documentation
 
-- [pixelactions.dev](https://pixelactions.dev) — the website: the loop, comparisons, how-to
-- [docs/CLI.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/CLI.md) — commands, chained verbs, the kill switch, exit codes
-- [docs/FLOW.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/FLOW.md) — the flow file: every step and setting
-- [docs/PROTOCOL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md) — the line protocol, with a client in full
-- [docs/OUTPUT.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/OUTPUT.md) — run, plan, and doctor reports
-- [docs/DEVELOPMENT.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/DEVELOPMENT.md) — builds, CI gates, releases
-- [SKILL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/SKILL.md) — for coding agents driving this tool
-- [design/](https://github.com/nolindnaidoo/pixelactions/blob/main/design/README.md) — market research, foundations, decisions, milestones, the two-tool contract
+- **[pixelactions.dev](https://pixelactions.dev)** — demo, comparisons, how-to
+- [docs/CLI.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/CLI.md) — every command, verb, flag, and exit code
+- [docs/FLOW.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/FLOW.md) — the flow file format, every action and setting
+- [docs/PROTOCOL.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md) — the line protocol, for driving it from any language
+- [docs/OUTPUT.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/OUTPUT.md) — the run report schema
+- [docs/DEVELOPMENT.md](https://github.com/nolindnaidoo/pixelactions/blob/main/docs/DEVELOPMENT.md) — building, CI gates, tests, releases
 - [CHANGELOG.md](https://github.com/nolindnaidoo/pixelactions/blob/main/CHANGELOG.md) — what changed and why
-- [CONTRIBUTING.md](https://github.com/nolindnaidoo/pixelactions/blob/main/CONTRIBUTING.md) — bug reports and pull requests
+- [SECURITY.md](https://github.com/nolindnaidoo/pixelactions/blob/main/SECURITY.md) — the threat model of a tool that moves your mouse
 
-## Why this exists
+## Also by nolindnaidoo
 
-Nothing maintained executes desktop input from declarative files with
-verification, cross-platform. The near neighbors are Windows-only,
-macOS-only, mobile-only, or welded to a VM; the incumbent everyone
-actually uses (PyAutoGUI) is unmaintained with no Wayland support; and
-computer-use agents shell out to xdotool in containers. Coordinates are
-the layer that works where accessibility trees don't exist — canvas
-apps, games, streamed desktops, legacy software.
+**Rust**
+
+- **[pixelcoords](https://github.com/nolindnaidoo/pixelcoords)** - Mark pixel-exact coordinates machines can use · [pixelcoords.dev](https://pixelcoords.dev)
+
+**VS Code Extensions** — every tool in the family, one page: **[letools.dev](https://letools.dev)**
+
+- **[String-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.string-le)** - Extract string values for i18n from JSON, YAML, CSV, TOML, INI, and .env
+- **[Numbers-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.numbers-le)** - Extract numeric values from JSON, YAML, CSV, TOML, INI, and .env
+- **[EnvSync-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.envsync-le)** - Spot missing keys across your .env files, with a markdown report
+- **[Paths-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.paths-le)** - Extract file paths from JS/TS imports, JSON, HTML, CSS, TOML, CSV, and .env
+- **[Secrets-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.secrets-le)** - Detect and sanitize credentials locally, before you commit
+- **[Scrape-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.scrape-le)** - Check whether a page is scrapeable before you write the scraper
+- **[Colors-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.colors-le)** - Extract and analyze colors from CSS, SCSS, LESS, Stylus, HTML, JS/TS, and SVG
+- **[URLs-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.urls-le)** - Extract URLs from documentation, configs, and code
+- **[Regex-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.regex-le)** - Find, test, and validate the regex patterns in the current file
+- **[Dates-LE](https://marketplace.visualstudio.com/items?itemName=nolindnaidoo.dates-le)** - Extract and analyze dates from logs, configs, and code
+
+**Contact Developer** — [GitHub](https://github.com/nolindnaidoo) · [LinkedIn](https://www.linkedin.com/in/nolindnaidoo/)
 
 ## License
 
 MIT — see [LICENSE](https://github.com/nolindnaidoo/pixelactions/blob/main/LICENSE).
-
-Built by [nolindnaidoo](https://github.com/nolindnaidoo).
