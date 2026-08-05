@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pixelactions"
+# Tracks the tool, deliberately. This is a client for one binary's
+# protocol, so a user should never have to reason about which client
+# version pairs with which pixelactions -- they are the same number.
+# `tests/test_version.py` fails if this drifts from the workspace.
+version = "0.9.6"
+description = "Drive desktop interactions from a human-marked pixelcoords session: click a label, not a coordinate, and confirm it landed"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "nolindnaidoo" }]
+keywords = ["automation", "desktop-automation", "rpa", "computer-use", "gui-testing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Desktop Environment",
+    "Topic :: Software Development :: Testing",
+]
+# No dependencies on purpose. The protocol is newline-delimited JSON over a
+# pipe; the standard library covers all of it, and a client whose whole
+# selling point is "no FFI, no native module" should not arrive with a
+# dependency tree.
+dependencies = []
+
+[project.urls]
+Homepage = "https://pixelactions.dev"
+Source = "https://github.com/nolindnaidoo/pixelactions"
+Protocol = "https://github.com/nolindnaidoo/pixelactions/blob/main/docs/PROTOCOL.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pixelactions"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
