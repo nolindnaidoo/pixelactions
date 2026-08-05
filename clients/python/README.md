@@ -108,8 +108,8 @@ is no version input to get wrong.
 
 Publishing uses [Trusted
 Publishing](https://docs.pypi.org/trusted-publishers/), so there is no API
-token stored anywhere. One-time setup on PyPI: add a publisher for
-`nolindnaidoo/pixelactions`, workflow `publish-python.yml`, environment
-`pypi`.
+token stored anywhere. One-time setup on each side — owner `nolindnaidoo`, repository
+`pixelactions`, workflow `publish-python.yml`, and environment matching
+the target (`testpypi` or `pypi`).
 
 MIT.

@@ -18,7 +18,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    environment: pypi
+    # Matches the target, so the trusted-publisher config on each side
+    # uses the same name as the place it publishes to.
+    environment: ${{ inputs.repository }}
     permissions:
       # Trusted Publishing: PyPI verifies this workflow's OIDC identity
       # instead of a stored API token. Nothing to leak, nothing to rotate.
