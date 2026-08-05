@@ -58,20 +58,17 @@ application reacting to one.
 
 ## Install
 
-| | |
-|---|---|
-| **macOS** | `brew tap nolindnaidoo/tap && brew install pixelactions` |
-| **Windows** | `winget install nolindnaidoo.pixelactions` |
-| **Anywhere with Rust 1.88+** | `cargo install pixelcoords pixelactions` |
-| **No toolchain** | prebuilt binaries on the [releases page](https://github.com/nolindnaidoo/pixelactions/releases) |
-| **From Python** | `pip install pixelactions` — a client for the line protocol, [docs](https://github.com/nolindnaidoo/pixelactions/tree/main/clients/python) |
+| Route | Command | Worth knowing |
+|---|---|---|
+| **Homebrew** | `brew tap nolindnaidoo/tap`<br>`brew install pixelactions` | **macOS only** — the formula has no Linux build. The one route that **installs pixelcoords for you**, because the formula declares the dependency. Tap once. |
+| **winget** | `winget install nolindnaidoo.pixelactions` | Windows 10+. A **portable** install — a PATH alias, nothing in Add/Remove Programs. **Install pixelcoords too**; winget will not pull it. |
+| **cargo** | `cargo install pixelcoords pixelactions` | Any platform, needs **Rust 1.88+**. Both crates on purpose: pixelactions calls the pixelcoords binary and refuses to run without a new enough one. |
+| **Prebuilt binary** | [releases page](https://github.com/nolindnaidoo/pixelactions/releases) | macOS (arm64 + x86_64), Windows, Linux. No auto-update. **Grab both tools**, from both releases pages. |
+| **Python** | `pip install pixelactions` | A **client, not a replacement** — it drives the same binary over the line protocol, so the binary still has to be installed by one of the routes above. [Docs](https://github.com/nolindnaidoo/pixelactions/tree/main/clients/python). |
 
-**It needs pixelcoords**, which it calls for capture-time work. Homebrew
-installs it for you; the other routes do not, so install both. `pixelactions
-doctor` reports whether the pair is workable before you rely on it.
-
-The Python package is a *client*, not a replacement — it drives the same
-binary over the line protocol, so it needs the binary too.
+Whichever route you take, `pixelactions doctor` reports whether the pair is
+workable — the right pixelcoords, the permissions, the display server —
+before you rely on it.
 
 Building on Linux needs the xkbcommon headers, because typing on Wayland
 means looking a character up in the compositor's own keymap:
