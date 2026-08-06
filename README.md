@@ -263,6 +263,7 @@ is in [design/05-NON-GOALS.md](https://github.com/nolindnaidoo/pixelactions/blob
 **Rust**
 
 - **[pixelcoords](https://github.com/nolindnaidoo/pixelcoords)** - Mark pixel-exact coordinates machines can use · [pixelcoords.dev](https://pixelcoords.dev)
+- **[scrape-le](https://github.com/nolindnaidoo/scrape-le/tree/main/crate)** - Check whether a page is scrapeable before the scraper is written · [crates.io](https://crates.io/crates/scrape-le)
 
 **VS Code Extensions** — every tool in the family, one page: **[letools.dev](https://letools.dev)**
 
