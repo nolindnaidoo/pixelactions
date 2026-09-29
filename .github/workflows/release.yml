@@ -35,7 +35,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: stable
-          targets: ${{ matrix.target }}
+      # rust-toolchain.toml selects the toolchain the build uses, so the target
+      # goes on that one rather than on the one the action installed.
+      - run: rustup target add ${{ matrix.target }}
       # The Linux binary links against libxkbcommon (the compositor sends
       # its keymap over EIS and we look characters up in it), so the
       # headers must be on the runner. Same package CI installs.
