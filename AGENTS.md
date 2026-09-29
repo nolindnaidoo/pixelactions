@@ -121,6 +121,23 @@ Flat over nested, guards over branches:
 - **Strict parsing of our own inputs, never silent defaults.**
 - **Dependencies are a cost.** Justify every new one in the PR body.
 - **No async runtime.** This tool runs, acts, and exits.
+- **Never run input-synthesis or timing tests on a desktop in use.** This
+  tool drives the real pointer and keyboard, so any timing figure, poll
+  count or success rate measured while someone is at the machine records
+  *their activity*, not the code — not a pass worth trusting, not a
+  failure worth investigating. The cross-platform scenario harnesses on
+  macOS, Windows and Linux CI are where those run: write the test, push
+  it, read the CI result. If one runs locally and fails, say plainly that
+  the figure came from a live desktop and **never name a cause** unless it
+  has been checked on a quiet machine. Never publish a benchmark from a
+  contended machine into a CHANGELOG, release note or PR without saying
+  so. On Wayland only `click` has been run through a full flow, so
+  `type`, `key`, `scroll` and `drag` results deserve extra suspicion.
+- **Always `cargo llvm-cov clean --workspace` before measuring coverage.**
+  Profile data merges across runs, so measure-change-measure produces a
+  report with one symbol under two crate hashes and one copy cold,
+  roughly halving the apparent number. CI starts clean, so this never
+  reproduces there and looks like a real local-vs-CI discrepancy.
 
 ## Coordinates (read before touching `convert` or `plan`)
 
@@ -275,3 +292,25 @@ fabricated point with `ok: true` regardless...
 because an entry that explains why a bug mattered is worth more than a
 list of subjects. The prefix helps someone scan `git log`; it does not
 replace the changelog.
+
+### Releases stack until 1.0.0
+
+While the hand-verification issues are open, fixes for **pixelactions,
+pixelactions-core, pixelcoords and pixelcoords-core** land on `main` and stop
+there. No tag, no GitHub release, no crates.io publish per fix — they
+accumulate until a single **1.0.0** cut across all four crates, both repos, and
+both sites.
+
+1.0 is a promise about the API and should not be made until those issues are
+worked. On Wayland only `click` has ever been run through a full flow, so
+`type`, `key`, `scroll` and `drag` could still need behavioural fixes — those
+are comfortable at 0.x and awkward after. Going straight to 1.0.0 also buys a
+caret pin that never needs bumping again, ending the cross-crate pin churn that
+pre-1.0 minors caused.
+
+So: do not propose tagging, releasing or publishing during this period. Land
+the fix, say it is stacked, move on. Intermediate version numbers do not matter
+because they will never be published. Before the cut, do a `pub` surface pass
+on both cores, since after 1.0 everything public is a commitment.
+
+Delete this subsection once 1.0.0 ships.
